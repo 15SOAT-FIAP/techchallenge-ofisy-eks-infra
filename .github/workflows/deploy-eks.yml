@@ -1,0 +1,75 @@
+name: Deploy EKS Infrastructure (Terraform)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  terraform-eks:
+    name: Provisionar Cluster EKS & Rede (Terraform)
+    runs-on: ubuntu-latest
+    environment: AWS_ACADEMY
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Garantir Bucket S3 do Terraform State
+        run: |
+          aws s3api head-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" 2>/dev/null || \
+          aws s3api create-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" --region us-east-1 || echo "Bucket já existente ou criado."
+
+      - name: Configurar Arquivos de Variáveis
+        run: |
+          cd infra
+          EKS_CLUSTER_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksClusterRole')].RoleName" --output text)
+          EKS_NODE_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksNodeRole')].RoleName" --output text)
+          if [ -z "$EKS_CLUSTER_ROLE" ]; then EKS_CLUSTER_ROLE="LabRole"; fi
+          if [ -z "$EKS_NODE_ROLE" ]; then EKS_NODE_ROLE="LabRole"; fi
+
+          echo 'account_id = "${{ secrets.AWS_ACCOUNT_ID }}"' > terraform.tfvars
+          echo 'role_name  = "LabRole"' >> terraform.tfvars
+          echo "eks_cluster_role = \"$EKS_CLUSTER_ROLE\"" >> terraform.tfvars
+          echo "eks_node_role = \"$EKS_NODE_ROLE\"" >> terraform.tfvars
+
+          echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
+          echo 'key    = "eks/terraform.tfstate"' >> backend.hcl
+          echo 'region = "us-east-1"' >> backend.hcl
+
+      - name: Terraform Init
+        run: |
+          cd infra
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Plan
+        run: |
+          cd infra
+          terraform plan -no-color > plan.txt
+          cat plan.txt
+          echo "### Planejamento de Infraestrutura do EKS & Redes" >> $GITHUB_STEP_SUMMARY
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          cat plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Apply
+        run: |
+          cd infra
+          terraform apply -auto-approve
+
+          EKS_NAME=$(terraform output -raw eks_cluster_name)
+          ECR_URL=$(terraform output -raw ecr_repository_url)
+          echo "### EKS & Redes Provisionados com Sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "- Cluster EKS: $EKS_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- Repositório ECR: $ECR_URL" >> $GITHUB_STEP_SUMMARY
