@@ -1,0 +1,92 @@
+name: Terraform Plan (PR)
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/pr-plan.yml'
+
+jobs:
+  terraform-plan:
+    name: Terraform Plan (EKS & Redes)
+    runs-on: ubuntu-latest
+    environment: AWS_ACADEMY
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Garantir Bucket S3 do Terraform State
+        run: |
+          aws s3api head-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" 2>/dev/null || \
+          aws s3api create-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" --region us-east-1 || echo "Bucket já existente ou criado."
+
+      - name: Configurar Arquivos de Variáveis
+        run: |
+          cd infra
+          EKS_CLUSTER_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksClusterRole')].RoleName" --output text)
+          EKS_NODE_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksNodeRole')].RoleName" --output text)
+          if [ -z "$EKS_CLUSTER_ROLE" ]; then EKS_CLUSTER_ROLE="LabRole"; fi
+          if [ -z "$EKS_NODE_ROLE" ]; then EKS_NODE_ROLE="LabRole"; fi
+
+          echo 'account_id = "${{ secrets.AWS_ACCOUNT_ID }}"' > terraform.tfvars
+          echo 'role_name  = "LabRole"' >> terraform.tfvars
+          echo "eks_cluster_role = \"$EKS_CLUSTER_ROLE\"" >> terraform.tfvars
+          echo "eks_node_role = \"$EKS_NODE_ROLE\"" >> terraform.tfvars
+
+          echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
+          echo 'key    = "eks/terraform.tfstate"' >> backend.hcl
+          echo 'region = "us-east-1"' >> backend.hcl
+
+      - name: Terraform Init
+        run: |
+          cd infra
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd infra
+          terraform plan -no-color > plan.txt
+          
+          echo "### Planejamento de Infraestrutura do EKS & Redes (PR)" >> $GITHUB_STEP_SUMMARY
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          cat plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Comentar PR com Plan
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/plan.txt', 'utf8');
+            const maxLen = 65000;
+            const safePlan = plan.length > maxLen ? plan.substring(0, maxLen) + '\n...[TRUNCATED]' : plan;
+            
+            const output = `#### Terraform Plan - EKS & Redes ☁️\n\n<details><summary>Mostrar detalhes do plano de execução</summary>\n\n\`\`\`terraform\n${safePlan}\n\`\`\`\n\n</details>\n\n*Ação rodada pelo commit ${context.sha}*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });

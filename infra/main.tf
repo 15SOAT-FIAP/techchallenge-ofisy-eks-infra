@@ -14,6 +14,6 @@ provider "aws" {
 }
 
 locals {
-  project_name = "techchallenge-ofisy"
+  project_name = "ofisy"
   aws_region   = var.aws_region
 }
