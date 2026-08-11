@@ -1,0 +1,81 @@
+name: Deploy Lambda de Autenticação (Terraform)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Tag da imagem no ECR ofisy-auth (SHA do commit publicado pelo CD do repositório de autenticação)"
+        required: true
+        type: string
+
+jobs:
+  terraform-auth-lambda:
+    name: Provisionar Lambda de Autenticação (Terraform)
+    runs-on: ubuntu-latest
+    environment: AWS_ACADEMY
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Validar Imagem no ECR
+        run: |
+          aws ecr describe-images \
+            --repository-name ofisy-auth \
+            --image-ids imageTag="${{ inputs.image_tag }}" \
+            --region us-east-1 > /dev/null || {
+              echo "Imagem ofisy-auth:${{ inputs.image_tag }} não encontrada no ECR."
+              echo "Rode o CD do repo techchallenge-ofisy-auth antes dessa pipeline."
+              exit 1
+            }
+
+      - name: Configurar Arquivos de Variáveis
+        run: |
+          cd infra-auth
+          echo 'account_id = "${{ secrets.AWS_ACCOUNT_ID }}"' > terraform.tfvars
+          echo 'role_name  = "LabRole"' >> terraform.tfvars
+          echo 'image_tag  = "${{ inputs.image_tag }}"' >> terraform.tfvars
+          echo 'db_password = "${{ secrets.DB_PASSWORD }}"' >> terraform.tfvars
+          echo 'jwt_secret  = "${{ secrets.JWT_SECRET }}"' >> terraform.tfvars
+
+          echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
+          echo 'key    = "auth/terraform.tfstate"' >> backend.hcl
+          echo 'region = "us-east-1"' >> backend.hcl
+
+      - name: Terraform Init
+        run: |
+          cd infra-auth
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Plan
+        run: |
+          cd infra-auth
+          terraform plan -no-color > plan.txt
+          cat plan.txt
+          echo "### Planejamento da Lambda de Autenticação" >> $GITHUB_STEP_SUMMARY
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          cat plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Apply
+        run: |
+          cd infra-auth
+          terraform apply -auto-approve
+
+          LAMBDA_NAME=$(terraform output -raw lambda_function_name)
+          echo "### Lambda de Autenticação Provisionada com Sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "- Função Lambda: $LAMBDA_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- Imagem: ofisy-auth:${{ inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
