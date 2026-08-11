@@ -1,0 +1,6 @@
+account_id = "123456789012"
+role_name  = "LabRole"
+image_tag  = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"
+
+db_password = "senha-do-rds"
+jwt_secret  = "segredo-compartilhado-com-a-aplicacao"
