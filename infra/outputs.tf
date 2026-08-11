@@ -32,3 +32,8 @@ output "ecr_repository_url" {
   description = "URL do repositório ECR"
   value       = aws_ecr_repository.main.repository_url
 }
+
+output "ecr_auth_repository_url" {
+  description = "URL do repositório ECR da Lambda de autenticação"
+  value       = aws_ecr_repository.auth.repository_url
+}
