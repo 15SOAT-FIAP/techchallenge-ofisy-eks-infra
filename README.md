@@ -1,4 +1,4 @@
-# Tech Challenge — Infraestrutura Kubernetes (AWS EKS & Redes via Terraform)
+# Tech Challenge - Infraestrutura Kubernetes (AWS EKS & Redes via Terraform)
 
 Repositório dedicado ao provisionamento infraestrutural base da aplicação **Ofisy** na AWS para a **Fase 3 do Tech Challenge SOAT (FIAP)**, englobando a rede (VPC, Subnets, Internet Gateway, NAT Gateway), o cluster Kubernetes (AWS EKS), os repositórios de imagens Docker (AWS ECR) e a função **AWS Lambda de autenticação de clientes**.
 
@@ -70,7 +70,7 @@ Cada etapa só pode rodar depois que a anterior terminou. A tabela abaixo detalh
 | **4** | O banco da etapa 3, a imagem da etapa 2 e o SG da Lambda da etapa 1 |
 | **5** | O cluster EKS e o ECR da etapa 1, e o banco da etapa 3              |
 
-As etapas **2 e 3 não dependem uma da outra** — podem ser invertidas ou executadas em paralelo, desde que ambas terminem antes da etapa 4.
+As etapas **2 e 3 não dependem uma da outra** - podem ser invertidas ou executadas em paralelo, desde que ambas terminem antes da etapa 4.
 
 Para **destruir**, percorra o caminho inverso: 5 → 4 → 3 → 1. Destruir a rede antes da Lambda deixa recursos órfãos, porque as ENIs da Lambda ficam presas às subnets.
 
