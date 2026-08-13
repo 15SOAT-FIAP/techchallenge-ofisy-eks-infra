@@ -1,27 +1,37 @@
-# Tech Challenge — Infraestrutura Kubernetes (AWS EKS & Redes via Terraform)
+# Tech Challenge - Infraestrutura Kubernetes (AWS EKS & Redes via Terraform)
 
-Repositório dedicado ao provisionamento infraestrutural base da aplicação **Ofisy** na AWS para a **Fase 3 do Tech Challenge SOAT (FIAP)**, englobando a rede (VPC, Subnets, Internet Gateway, NAT Gateway), o cluster Kubernetes (AWS EKS) e o repositório de imagens Docker (AWS ECR).
+Repositório dedicado ao provisionamento infraestrutural base da aplicação **Ofisy** na AWS para a **Fase 3 do Tech Challenge SOAT (FIAP)**, englobando a rede (VPC, Subnets, Internet Gateway, NAT Gateway), o cluster Kubernetes (AWS EKS), os repositórios de imagens Docker (AWS ECR) e a função **AWS Lambda de autenticação de clientes**.
+
+O repositório contém **duas camadas independentes**, cada uma com seu próprio state do Terraform:
+
+| Diretório     | State                    | Conteúdo                           |
+| :------------ | :----------------------- | :--------------------------------- |
+| `infra/`      | `eks/terraform.tfstate`  | Rede, EKS, ECR e Security Groups   |
+| `infra-auth/` | `auth/terraform.tfstate` | Lambda de autenticação de clientes |
+
+A separação existe porque a Lambda depende do RDS, que é provisionado em [outro repositório](https://github.com/15SOAT-FIAP/techchallenge-ofisy-rds-infra), e esse repo depende da rede criada aqui. Manter tudo em um único state fecharia um ciclo entre os dois repositórios, impossibilitando o provisionamento a partir de uma conta vazia.
 
 ---
 
-## 🎯 Propósito do Repositório
+## Propósito do Repositório
 
-Isolar e automatizar o provisionamento da infraestrutura de computação em nuvem necessária para suportar a aplicação principal e o banco de dados relacional. 
+Isolar e automatizar o provisionamento da infraestrutura de computação em nuvem necessária para suportar a aplicação principal e o banco de dados relacional.
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+## Tecnologias Utilizadas
 
 - **Terraform (`>= 1.5.0`)**: Infraestrutura como Código (IaC).
 - **AWS EKS (Elastic Kubernetes Service)**: Cluster Kubernetes gerenciado.
 - **AWS VPC & Networking**: Subnets públicas/privadas, Internet Gateway, NAT Gateway e Tabela de Roteamento.
-- **AWS ECR (Elastic Container Registry)**: Registro privado de imagens de container (`ofisy-ecr`).
-- **AWS IAM**: Gerenciamento de papéis de execução para cluster e worker nodes (compatível com AWS Academy / `LabRole`).
+- **AWS ECR (Elastic Container Registry)**: Registros privados de imagens de container (`ofisy-ecr` para a aplicação e `ofisy-auth` para a Lambda).
+- **AWS Lambda**: Função de autenticação de clientes, empacotada como imagem de container `arm64` e executada dentro da VPC.
+- **AWS IAM**: Gerenciamento de papéis de execução para cluster, worker nodes e Lambda (compatível com AWS Academy / `LabRole`).
 - **GitHub Actions**: Pipeline automatizada de CI/CD para deploy e destruição da infraestrutura.
 
 ---
 
-## 📐 Arquitetura de Rede e EKS
+## Arquitetura de Rede e EKS
 
 ```text
 AWS Cloud (us-east-1)
@@ -35,32 +45,86 @@ AWS Cloud (us-east-1)
 
 ---
 
-## 🔐 Configuração de Secrets no GitHub
+## Ordem de Execução entre os Repositórios
 
-Para a execução da pipeline de deploy (`Deploy EKS Infrastructure`), adicione as seguintes **Repository Secrets** no GitHub:
+A infraestrutura da Fase 3 está distribuída em quatro repositórios que se conectam **apenas por Data Sources** (busca por tag ou por nome), nunca por referência direta de recurso. Isso significa que a ordem abaixo precisa ser respeitada: cada etapa só encontra o que a anterior criou.
 
-| Secret | Descrição |
-| :--- | :--- |
-| `AWS_ACCESS_KEY_ID` | Chave de acesso AWS |
-| `AWS_SECRET_ACCESS_KEY` | Chave secreta AWS |
-| `AWS_SESSION_TOKEN` | Token da sessão AWS (obrigatório para AWS Academy) |
-| `AWS_ACCOUNT_ID` | ID da conta AWS |
+```mermaid
+flowchart TD
+    P1["1. eks-infra - infra/<br/>Rede, EKS, ECR e Security Groups"]
+    P2["2. techchallenge-ofisy-auth<br/>CD publica a imagem da Lambda no ECR"]
+    P3["3. techchallenge-ofisy-rds-infra<br/>Banco de dados RDS PostgreSQL"]
+    P4["4. eks-infra - infra-auth/<br/>Lambda de autenticacao"]
+    P5["5. techchallenge-ofisy<br/>Aplicacao Spring Boot no EKS"]
+
+    P1 --> P2 --> P3 --> P4 --> P5
+```
+
+Cada etapa só pode rodar depois que a anterior terminou. A tabela abaixo detalha o que precisa existir em cada uma:
+
+| Etapa | Precisa que já exista                                               |
+| :---- | :------------------------------------------------------------------ |
+| **1** | Nada além da conta AWS e dos secrets configurados                   |
+| **2** | O repositório ECR `ofisy-auth`, vazio, criado na etapa 1            |
+| **3** | VPC, subnets privadas e Security Groups da etapa 1                  |
+| **4** | O banco da etapa 3, a imagem da etapa 2 e o SG da Lambda da etapa 1 |
+| **5** | O cluster EKS e o ECR da etapa 1, e o banco da etapa 3              |
+
+As etapas **2 e 3 não dependem uma da outra** - podem ser invertidas ou executadas em paralelo, desde que ambas terminem antes da etapa 4.
+
+Para **destruir**, percorra o caminho inverso: 5 → 4 → 3 → 1. Destruir a rede antes da Lambda deixa recursos órfãos, porque as ENIs da Lambda ficam presas às subnets.
+
+### Contrato entre os repositórios
+
+Como não há referência direta entre states, o que liga as camadas são **nomes e tags**. Renomear qualquer item desta tabela quebra o `apply` do repositório vizinho:
+
+| Recurso          | Identificador                  | Criado por    | Lido por                                  |
+| :--------------- | :----------------------------- | :------------ | :---------------------------------------- |
+| VPC              | tag `ofisy-vpc`                | `infra/`      | rds-infra, `infra-auth/`                  |
+| Subnets privadas | tag `ofisy-private-subnet-*`   | `infra/`      | rds-infra, `infra-auth/`                  |
+| SG do EKS        | tag `ofisy-eks-sg`             | `infra/`      | rds-infra                                 |
+| SG da Lambda     | tag `ofisy-lambda-auth-sg`     | `infra/`      | rds-infra, `infra-auth/`                  |
+| ECR da Lambda    | `ofisy-auth`                   | `infra/`      | CD do repo de autenticação, `infra-auth/` |
+| Instância RDS    | identifier `ofisy-postgres-db` | rds-infra     | `infra-auth/`                             |
+| Função Lambda    | `ofisy-auth`                   | `infra-auth/` | stack do API Gateway                      |
+
+O Security Group da Lambda é criado em `infra/`, e não junto da função, justamente para que o rds-infra consiga liberar a porta 5432 a partir dele sem depender do state da Lambda.
 
 ---
 
-## 🚀 Como Executar
+## Configuração de Secrets no GitHub
+
+Os secrets são definidos como **Organization Secrets** na org `15SOAT-FIAP`, de modo que os quatro repositórios da Fase 3 compartilhem a mesma definição. As credenciais do AWS Academy expiram a cada sessão de laboratório, e centralizadas basta rotacioná-las em um único lugar.
+
+| Secret                  | Descrição                                                                                           |
+| :---------------------- | :-------------------------------------------------------------------------------------------------- |
+| `AWS_ACCESS_KEY_ID`     | Chave de acesso AWS                                                                                 |
+| `AWS_SECRET_ACCESS_KEY` | Chave secreta AWS                                                                                   |
+| `AWS_SESSION_TOKEN`     | Token da sessão AWS (obrigatório para AWS Academy)                                                  |
+| `AWS_ACCOUNT_ID`        | ID da conta AWS                                                                                     |
+| `DB_PASSWORD`           | Senha do PostgreSQL. Definida pelo repositório do RDS e consumida pela Lambda e pela aplicação      |
+| `JWT_SECRET`            | Segredo de assinatura do JWT. Precisa ser idêntico entre a Lambda (que assina) e a API (que valida) |
+
+---
+
+## Como Executar
 
 ### Opção A: Execução via GitHub Actions (Recomendado)
 
 1. Vá até a aba **Actions** do repositório no GitHub.
-2. Selecione a pipeline **`Deploy EKS Infrastructure (Terraform)`**.
-3. Clique em **Run workflow** selecionando a branch desejada (ex: `main` ou `feature/185-eks-infra`).
+2. Selecione a pipeline **`Deploy EKS Infrastructure (Terraform)`** e clique em **Run workflow**, escolhendo a branch desejada. Esta é a **etapa 1** do fluxo.
+3. Depois que o RDS e a imagem da Lambda estiverem prontos (etapas 2 e 3), selecione **`Deploy Lambda de Autenticação (Terraform)`** e clique em **Run workflow**, informando em `image_tag` o SHA do commit publicado no ECR pelo CD do repositório de autenticação.
+
+A pipeline da Lambda verifica se a imagem existe no ECR antes de rodar o Terraform, e falha com uma mensagem explícita caso a etapa 2 ainda não tenha sido concluída.
+
+Os workflows **`Destruir Infraestrutura EKS`** e **`Destruir Lambda de Autenticação`** fazem o caminho inverso, destrua sempre a Lambda antes da rede.
 
 ---
 
 ### Opção B: Execução Local via CLI
 
 #### 1. Pré-requisitos
+
 - AWS CLI configurado (`aws configure`).
 - Terraform `v1.5.0` ou superior instalado.
 
@@ -86,11 +150,31 @@ terraform plan
 terraform apply -auto-approve
 ```
 
+#### 3. Camada da Lambda (`infra-auth/`)
+
+Execute somente após o RDS estar provisionado e a imagem `ofisy-auth:<sha>` publicada no ECR:
+
+```bash
+cd infra-auth
+
+cp terraform.tfvars.example terraform.tfvars
+cp backend.hcl.example backend.hcl
+
+# Preencha account_id, image_tag, db_password e jwt_secret no terraform.tfvars
+# e o account_id no backend.hcl (a key deve ser auth/terraform.tfstate)
+
+terraform init -backend-config=backend.hcl
+terraform plan
+terraform apply -auto-approve
+```
+
+O deploy de código da Lambda **não passa pelo Terraform**: o campo `image_uri` está sob `ignore_changes`, e o CD do repositório de autenticação atualiza a função com `aws lambda update-function-code`. O `image_tag` aqui só define com qual imagem a função é criada.
+
 ---
 
-## 🔗 Repositórios Relacionados (Fase 3)
+## Repositórios Relacionados (Fase 3)
 
-1. 🔐 **Serverless Function (Lambda)** — Autenticação de clientes via CPF e geração de JWT token.
-2. ☁️ **[Infraestrutura EKS (Este repositório)](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra)**
-3. 🗄️ **[Infraestrutura RDS PostgreSQL](https://github.com/15SOAT-FIAP/techchallenge-ofisy-rds-infra)** — Provisionamento isolado do banco relacional gerenciado.
-4. 🚀 **[Aplicação Principal em Kubernetes](https://github.com/15SOAT-FIAP/techchallenge-ofisy)** — Aplicação Spring Boot, Dockerfile, manifestos Kubernetes (`k8s/`) e CD.
+1. **[Serverless Function (Lambda)](https://github.com/15SOAT-FIAP/techchallenge-ofisy-auth)** - Autenticação de clientes via CPF e geração de JWT token. O código vive lá; a infraestrutura da função é provisionada aqui, em `infra-auth/`.
+2. **[Infraestrutura EKS (Este repositório)](https://github.com/15SOAT-FIAP/techchallenge-ofisy-eks-infra)**
+3. **[Infraestrutura RDS PostgreSQL](https://github.com/15SOAT-FIAP/techchallenge-ofisy-rds-infra)** - Provisionamento isolado do banco relacional gerenciado.
+4. **[Aplicação Principal em Kubernetes](https://github.com/15SOAT-FIAP/techchallenge-ofisy)** - Aplicação Spring Boot, Dockerfile, manifestos Kubernetes (`k8s/`) e CD.

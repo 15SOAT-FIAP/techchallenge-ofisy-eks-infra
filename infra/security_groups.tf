@@ -65,3 +65,26 @@ resource "aws_security_group_rule" "eks_egress" {
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.eks.id
 }
+
+########################################
+# SECURITY GROUP - LAMBDA CUSTOMERS AUTH
+########################################
+
+resource "aws_security_group" "lambda_auth" {
+  name        = "${local.project_name}-lambda-auth-sg"
+  description = "Security Group para a Lambda de autenticacao de clientes"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "${local.project_name}-lambda-auth-sg"
+  }
+}
+
+resource "aws_security_group_rule" "lambda_auth_egress" {
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.lambda_auth.id
+}
