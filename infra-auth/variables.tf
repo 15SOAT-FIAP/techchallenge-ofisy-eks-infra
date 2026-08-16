@@ -20,6 +20,11 @@ variable "image_tag" {
   type        = string
 }
 
+variable "authorizer_image_tag" {
+  description = "Tag da imagem no ECR do authorizer para deploy (SHA do commit publicado pelo CD do repositório de auth)"
+  type        = string
+}
+
 variable "db_password" {
   description = "Senha do usuário administrativo do banco de dados PostgreSQL"
   type        = string
