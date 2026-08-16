@@ -1,0 +1,82 @@
+name: Deploy API Gateway (Terraform)
+
+on:
+  workflow_dispatch:
+    inputs:
+      nlb_dns_name:
+        description: "DNS do NLB (kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+        required: true
+      auth_lambda_name:
+        description: "Nome da Lambda de emissão de token via CPF/CNPJ"
+        required: true
+        default: "ofisy-auth"
+      auth_authorizer_lambda_name:
+        description: "Nome da Lambda Authorizer (valida o token nas rotas protegidas)"
+        required: true
+        default: "ofisy-auth-authorizer"
+
+jobs:
+  terraform-api-gateway:
+    name: Provisionar API Gateway (Terraform)
+    runs-on: ubuntu-latest
+    environment: AWS_ACADEMY
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Garantir Bucket S3 do Terraform State
+        run: |
+          aws s3api head-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" 2>/dev/null || \
+          aws s3api create-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" --region us-east-1 || echo "Bucket já existente ou criado."
+
+      - name: Configurar Arquivos de Variáveis
+        run: |
+          cd api-gateway
+
+          {
+            echo "nlb_dns_name                = \"${{ inputs.nlb_dns_name }}\""
+            echo "auth_lambda_name             = \"${{ inputs.auth_lambda_name }}\""
+            echo "auth_authorizer_lambda_name  = \"${{ inputs.auth_authorizer_lambda_name }}\""
+          } > terraform.tfvars
+
+          echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
+          echo 'key    = "api-gateway/terraform.tfstate"' >> backend.hcl
+          echo 'region = "us-east-1"' >> backend.hcl
+
+      - name: Terraform Init
+        run: |
+          cd api-gateway
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Plan
+        run: |
+          cd api-gateway
+          terraform plan -no-color > plan.txt
+          cat plan.txt
+          echo "### Planejamento do API Gateway" >> $GITHUB_STEP_SUMMARY
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          cat plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Apply
+        run: |
+          cd api-gateway
+          terraform apply -auto-approve
+
+          GATEWAY_URL=$(terraform output -raw api_gateway_invoke_url)
+          echo "### API Gateway Provisionado com Sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "- URL: $GATEWAY_URL" >> $GITHUB_STEP_SUMMARY
