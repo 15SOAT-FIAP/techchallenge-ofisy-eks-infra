@@ -1,0 +1,53 @@
+name: Destruir API Gateway (Terraform)
+
+on:
+  workflow_dispatch:
+    inputs:
+      auth_lambda_name:
+        description: "Nome da Lambda de emissão de token (precisa ainda existir - o destroy avalia o data source)"
+        required: true
+        type: string
+        default: "ofisy-auth"
+
+jobs:
+  destroy-api-gateway:
+    name: Destruir API Gateway
+    runs-on: ubuntu-latest
+    environment: AWS_ACADEMY
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Configurar Arquivos de Variáveis
+        run: |
+          cd api-gateway
+          echo 'nlb_dns_name     = "destroy"' > terraform.tfvars
+          echo 'auth_lambda_name = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
+
+          echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
+          echo 'key    = "api-gateway/terraform.tfstate"' >> backend.hcl
+          echo 'region = "us-east-1"' >> backend.hcl
+
+      - name: Terraform Init
+        run: |
+          cd api-gateway
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Destroy
+        run: |
+          cd api-gateway
+          terraform destroy -auto-approve

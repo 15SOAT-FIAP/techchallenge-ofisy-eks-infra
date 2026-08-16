@@ -7,8 +7,3 @@ output "auth_lambda_arn" {
   description = "ARN da funcao Lambda de emissao do token via CPF/CNPJ, conforme resolvida pelo data source"
   value       = data.aws_lambda_function.auth.arn
 }
-
-output "auth_authorizer_lambda_arn" {
-  description = "ARN da funcao Lambda Authorizer, conforme resolvida pelo data source"
-  value       = data.aws_lambda_function.authorizer.arn
-}

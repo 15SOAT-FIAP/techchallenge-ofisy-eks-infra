@@ -1,21 +1,23 @@
 # Tech Challenge - Infraestrutura Kubernetes (AWS EKS & Redes via Terraform)
 
-Repositório dedicado ao provisionamento infraestrutural base da aplicação **Ofisy** na AWS para a **Fase 3 do Tech Challenge SOAT (FIAP)**, englobando a rede (VPC, Subnets, Internet Gateway, NAT Gateway), o cluster Kubernetes (AWS EKS), os repositórios de imagens Docker (AWS ECR) e a função **AWS Lambda de autenticação de clientes**.
+Repositório dedicado ao provisionamento infraestrutural base da aplicação **Ofisy** na AWS para a **Fase 3 do Tech Challenge SOAT (FIAP)**, englobando a rede (VPC, Subnets, Internet Gateway, NAT Gateway), o cluster Kubernetes (AWS EKS), os repositórios de imagens Docker (AWS ECR), as funções **AWS Lambda de autenticação de clientes** (emissão de token e validação) e o **API Gateway** público da aplicação.
 
-O repositório contém **duas camadas independentes**, cada uma com seu próprio state do Terraform:
+O repositório contém **três camadas independentes**, cada uma com seu próprio state do Terraform:
 
-| Diretório     | State                    | Conteúdo                           |
-| :------------ | :----------------------- | :--------------------------------- |
-| `infra/`      | `eks/terraform.tfstate`  | Rede, EKS, ECR e Security Groups   |
-| `infra-auth/` | `auth/terraform.tfstate` | Lambda de autenticação de clientes |
+| Diretório | State | Conteúdo |
+| :--- | :--- | :--- |
+| `infra/` | `eks/terraform.tfstate` | Rede, EKS, ECRs e Security Groups |
+| `infra-auth/` | `auth/terraform.tfstate` | Lambdas de autenticação de clientes (emissão de token e authorizer) |
+| `api-gateway/` | `api-gateway/terraform.tfstate` | API Gateway público, integrado às Lambdas e ao NLB da aplicação |
 
-A separação existe porque a Lambda depende do RDS, que é provisionado em [outro repositório](https://github.com/15SOAT-FIAP/techchallenge-ofisy-rds-infra), e esse repo depende da rede criada aqui. Manter tudo em um único state fecharia um ciclo entre os dois repositórios, impossibilitando o provisionamento a partir de uma conta vazia.
+A separação entre `infra/` e `infra-auth/` existe porque a Lambda depende do RDS, que é provisionado em [outro repositório](https://github.com/15SOAT-FIAP/techchallenge-ofisy-rds-infra), e esse repo depende da rede criada aqui - manter tudo em um único state fecharia um ciclo entre os dois repositórios, impossibilitando o provisionamento a partir de uma conta vazia.
 
+O `api-gateway/` é uma terceira camada, separada das outras duas, porque ele depende do **NLB da aplicação** (repositório `techchallenge-ofisy`), que só existe depois que o app já foi deployado no cluster - ou seja, depois de tudo o mais.
 ---
 
 ## Propósito do Repositório
 
-Isolar e automatizar o provisionamento da infraestrutura de computação em nuvem necessária para suportar a aplicação principal e o banco de dados relacional.
+Isolar e automatizar o provisionamento da infraestrutura de computação em nuvem necessária para suportar a aplicação principal e o banco de dados relacional, além de expor publicamente essa aplicação através de um **API Gateway** que protege, com autenticação via CPF/CNPJ, a rota de consulta de status de ordem de serviço.
 
 ---
 
@@ -26,6 +28,7 @@ Isolar e automatizar o provisionamento da infraestrutura de computação em nuve
 - **AWS VPC & Networking**: Subnets públicas/privadas, Internet Gateway, NAT Gateway e Tabela de Roteamento.
 - **AWS ECR (Elastic Container Registry)**: Registros privados de imagens de container (`ofisy-ecr` para a aplicação e `ofisy-auth` para a Lambda).
 - **AWS Lambda**: Função de autenticação de clientes, empacotada como imagem de container `arm64` e executada dentro da VPC.
+- **AWS API Gateway (HTTP API)**: Porta de entrada pública da aplicação - expõe `POST /auth/customers` e repassa as demais rotas para o EKS.
 - **AWS IAM**: Gerenciamento de papéis de execução para cluster, worker nodes e Lambda (compatível com AWS Academy / `LabRole`).
 - **GitHub Actions**: Pipeline automatizada de CI/CD para deploy e destruição da infraestrutura.
 
@@ -56,8 +59,9 @@ flowchart TD
     P3["3. techchallenge-ofisy-rds-infra<br/>Banco de dados RDS PostgreSQL"]
     P4["4. eks-infra - infra-auth/<br/>Lambda de autenticacao"]
     P5["5. techchallenge-ofisy<br/>Aplicacao Spring Boot no EKS"]
+    P6["6. eks-infra - api-gateway/<br/>API Gateway publico"]
 
-    P1 --> P2 --> P3 --> P4 --> P5
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6
 ```
 
 Cada etapa só pode rodar depois que a anterior terminou. A tabela abaixo detalha o que precisa existir em cada uma:
@@ -87,6 +91,7 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | ECR da Lambda    | `ofisy-auth`                   | `infra/`      | CD do repo de autenticação, `infra-auth/` |
 | Instância RDS    | identifier `ofisy-postgres-db` | rds-infra     | `infra-auth/`                             |
 | Função Lambda    | `ofisy-auth`                   | `infra-auth/` | stack do API Gateway                      |
+| NLB da aplicação | DNS informado manualmente (var `nlb_dns_name`) | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
 
 O Security Group da Lambda é criado em `infra/`, e não junto da função, justamente para que o rds-infra consiga liberar a porta 5432 a partir dele sem depender do state da Lambda.
 
@@ -169,6 +174,30 @@ terraform apply -auto-approve
 ```
 
 O deploy de código da Lambda **não passa pelo Terraform**: o campo `image_uri` está sob `ignore_changes`, e o CD do repositório de autenticação atualiza a função com `aws lambda update-function-code`. O `image_tag` aqui só define com qual imagem a função é criada.
+
+---
+
+#### 4. Camada do API Gateway (`api-gateway/`)
+
+Execute somente após as duas Lambdas existirem e a aplicação já ter sido deployada no cluster (para o NLB existir):
+
+```bash
+cd api-gateway
+
+cp terraform.tfvars.example terraform.tfvars
+cp backend.hcl.example backend.hcl
+
+# Preencha nlb_dns_name, auth_lambda_name e auth_authorizer_lambda_name
+# no terraform.tfvars, e o bucket no backend.hcl
+# (a key deve ser api-gateway/terraform.tfstate)
+
+terraform init -backend-config=backend.hcl
+terraform plan
+terraform apply -auto-approve
+
+# URL pública final:
+terraform output api_gateway_invoke_url
+```
 
 ---
 

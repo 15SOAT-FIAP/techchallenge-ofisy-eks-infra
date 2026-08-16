@@ -21,13 +21,3 @@ variable "auth_lambda_name" {
   type        = string
   default     = "ofisy-auth"
 }
-
-variable "auth_authorizer_lambda_name" {
-  description = <<-EOT
-    Nome da funcao Lambda Authorizer, que valida o token nas rotas
-    protegidas (repositorio techchallenge-ofisy-auth, entrypoint separado
-    do de emissao do token). Deve ja existir no momento do apply.
-  EOT
-  type        = string
-  default     = "ofisy-auth-authorizer"
-}
