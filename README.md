@@ -93,7 +93,6 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | Subnets privadas | tag `ofisy-private-subnet-*` | `infra/` | rds-infra, `infra-auth/` |
 | SG do EKS | tag `ofisy-eks-sg` | `infra/` | rds-infra |
 | SG da Lambda (emissão de token) | tag `ofisy-lambda-auth-sg` | `infra/` | rds-infra*, `infra-auth/` |
-| SG do RDS | tag `ofisy-rds-sg` | rds-infra | `infra-auth/` (libera a porta 5432 para o SG acima) |
 | ECR da Lambda (emissão de token) | `ofisy-auth` | `infra/` | CD do repo de autenticação, `infra-auth/` |
 | ECR da Lambda (authorizer) | `ofisy-auth-authorizer` | `infra/` | CD do repo de autenticação, `infra-auth/` |
 | Instância RDS | identifier `ofisy-postgres-db` | rds-infra | `infra-auth/` |
@@ -101,7 +100,26 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | Função Lambda (authorizer) | `ofisy-auth-authorizer` | `infra-auth/` | `api-gateway/` |
 | NLB da aplicação | DNS informado manualmente (var `nlb_dns_name`) | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
 
-\* **Ponto em aberto:** a regra de ingress que libera a porta 5432 do RDS para este SG está hoje implementada em `infra-auth/rds_access.tf` (lendo o SG do RDS via `data source`). Precisa alinhar com o dono do `rds-infra` se essa regra deve continuar aqui ou migrar pra lá - criá-la nos dois lados faz o `apply` de um deles falhar por regra duplicada.
+O Security Group da Lambda é criado em `infra/`, e não junto da função, justamente para que o rds-infra consiga liberar a porta 5432 a partir dele sem depender do state da Lambda.
+
+---
+
+## Observabilidade (Datadog Agent)
+
+O `infra/` também provisiona o **Datadog Agent** no cluster EKS via Helm (`helm_release.datadog`, chart `datadog/datadog`), usando os providers `kubernetes` e `helm` do Terraform autenticados contra o próprio cluster criado na mesma execução (`aws_eks_cluster_auth`).
+
+O Agent roda como DaemonSet (um pod por node) mais o Cluster Agent, coletando métricas de CPU e memória de nodes e pods via kubelet/kube-state-metrics. Logs (JSON estruturado, com correlação de requisições) e APM (via Unix Domain Socket) ficam habilitados; o Process Agent continua desativado para manter o footprint baixo nos nodes `t3.medium`. A correlação entre logs e traces e o envio de spans de latência das APIs dependem da instrumentação da aplicação (`dd-trace-java`) no repositório `techchallenge-ofisy` — não fazem parte deste repositório.
+
+Alertas (`datadog_monitor`) e healthcheck/uptime (Synthetics) não são gerenciados por Terraform neste repositório — são criados manualmente na UI do Datadog.
+
+Variáveis relevantes (`infra/variables.tf`):
+
+| Variável          | Descrição                                                               |
+| :---------------- | :----------------------------------------------------------------------- |
+| `datadog_api_key` | API Key do Datadog (sensível). Nas pipelines vem do secret `DD_API_KEY` |
+| `datadog_site`    | Site do Datadog (padrão: `us5.datadoghq.com`)                           |
+
+Para execução local, preencha essas variáveis no `terraform.tfvars` (veja `terraform.tfvars.example`).
 
 ---
 
@@ -117,6 +135,7 @@ Os secrets são definidos como **Organization Secrets** na org `15SOAT-FIAP`, de
 | `AWS_ACCOUNT_ID` | ID da conta AWS |
 | `DB_PASSWORD` | Senha do PostgreSQL. Definida pelo repositório do RDS e consumida pela Lambda de emissão de token e pela aplicação |
 | `JWT_SECRET` | Segredo de assinatura do JWT. Precisa ser idêntico entre a Lambda que assina (emissão de token) e a Lambda que valida (authorizer) - o app Spring Boot não participa mais dessa validação |
+| `DD_API_KEY`            | API Key do Datadog, usada pelo Datadog Agent instalado no cluster EKS para enviar métricas          |
 
 O `api-gateway/` não usa nenhum secret adicional: os valores que variam (`nlb_dns_name`, `auth_lambda_name`, `auth_authorizer_lambda_name`) são informados como input do `workflow_dispatch`, não como secret.
 
@@ -149,7 +168,7 @@ Os workflows **`Destruir API Gateway`**, **`Destruir Lambda de Autenticação`**
 - AWS CLI configurado (`aws configure`).
 - Terraform `v1.5.0` ou superior instalado.
 
-#### 2. Camada de rede, EKS e ECRs (`infra/`)
+#### 2. Passos
 
 ```bash
 # 1. Entre na pasta da infraestrutura
