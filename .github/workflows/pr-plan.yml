@@ -50,6 +50,8 @@ jobs:
           echo 'role_name  = "LabRole"' >> terraform.tfvars
           echo "eks_cluster_role = \"$EKS_CLUSTER_ROLE\"" >> terraform.tfvars
           echo "eks_node_role = \"$EKS_NODE_ROLE\"" >> terraform.tfvars
+          echo 'datadog_api_key = "${{ secrets.DD_API_KEY }}"' >> terraform.tfvars
+          echo 'datadog_site    = "us5.datadoghq.com"' >> terraform.tfvars
 
           echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
           echo 'key    = "eks/terraform.tfstate"' >> backend.hcl
