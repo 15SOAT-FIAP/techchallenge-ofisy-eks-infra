@@ -92,6 +92,25 @@ O Security Group da Lambda é criado em `infra/`, e não junto da função, just
 
 ---
 
+## Observabilidade (Datadog Agent)
+
+O `infra/` também provisiona o **Datadog Agent** no cluster EKS via Helm (`helm_release.datadog`, chart `datadog/datadog`), usando os providers `kubernetes` e `helm` do Terraform autenticados contra o próprio cluster criado na mesma execução (`aws_eks_cluster_auth`).
+
+O Agent roda como DaemonSet (um pod por node) mais o Cluster Agent, coletando métricas de CPU e memória de nodes e pods via kubelet/kube-state-metrics. Logs (JSON estruturado, com correlação de requisições) e APM (via Unix Domain Socket) ficam habilitados; o Process Agent continua desativado para manter o footprint baixo nos nodes `t3.medium`. A correlação entre logs e traces e o envio de spans de latência das APIs dependem da instrumentação da aplicação (`dd-trace-java`) no repositório `techchallenge-ofisy`.
+
+Alertas (`datadog_monitor`) e healthcheck/uptime (Synthetics) não são gerenciados por Terraform neste repositório, são criados manualmente na UI do Datadog.
+
+Variáveis relevantes (`infra/variables.tf`):
+
+| Variável          | Descrição                                                               |
+| :---------------- | :----------------------------------------------------------------------- |
+| `datadog_api_key` | API Key do Datadog (sensível). Nas pipelines vem do secret `DD_API_KEY` |
+| `datadog_site`    | Site do Datadog (padrão: `us5.datadoghq.com`)                           |
+
+Para execução local, preencha essas variáveis no `terraform.tfvars` (veja `terraform.tfvars.example`).
+
+---
+
 ## Configuração de Secrets no GitHub
 
 Os secrets são definidos como **Organization Secrets** na org `15SOAT-FIAP`, de modo que os quatro repositórios da Fase 3 compartilhem a mesma definição. As credenciais do AWS Academy expiram a cada sessão de laboratório, e centralizadas basta rotacioná-las em um único lugar.
@@ -104,6 +123,7 @@ Os secrets são definidos como **Organization Secrets** na org `15SOAT-FIAP`, de
 | `AWS_ACCOUNT_ID`        | ID da conta AWS                                                                                     |
 | `DB_PASSWORD`           | Senha do PostgreSQL. Definida pelo repositório do RDS e consumida pela Lambda e pela aplicação      |
 | `JWT_SECRET`            | Segredo de assinatura do JWT. Precisa ser idêntico entre a Lambda (que assina) e a API (que valida) |
+| `DD_API_KEY`            | API Key do Datadog, usada pelo Datadog Agent instalado no cluster EKS para enviar métricas          |
 
 ---
 
