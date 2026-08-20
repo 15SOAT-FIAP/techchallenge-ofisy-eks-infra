@@ -58,9 +58,4 @@ data "aws_security_group" "rds" {
     name   = "vpc-id"
     values = [data.aws_vpc.main.id]
   }
-
-  filter {
-    name   = "tag:Name"
-    values = ["${local.project_name}-rds-sg"]
-  }
 }
