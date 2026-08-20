@@ -100,7 +100,7 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | Função Lambda (authorizer) | `ofisy-auth-authorizer` | `infra-auth/` | `api-gateway/` |
 | NLB da aplicação | DNS informado manualmente (var `nlb_dns_name`) | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
 
-\* **Ponto em aberto:** a regra de ingress que libera a porta 5432 do RDS para este SG está hoje implementada em `infra-auth/rds_access.tf` (lendo o SG do RDS via `data source`). Precisa alinhar com o dono do `rds-infra` se essa regra deve continuar aqui ou migrar pra lá - criá-la nos dois lados faz o `apply` de um deles falhar por regra duplicada.
+O Security Group da Lambda é criado em `infra/`, e não junto da função, justamente para que o rds-infra consiga liberar a porta 5432 a partir dele sem depender do state da Lambda.
 
 ---
 
