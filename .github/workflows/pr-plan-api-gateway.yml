@@ -1,14 +1,14 @@
-name: Terraform Plan Lambda de Autenticação (PR)
+name: Terraform Plan API Gateway (PR)
 
 on:
   pull_request:
     paths:
-      - 'infra-auth/**'
-      - '.github/workflows/pr-plan-auth.yml'
+      - 'api-gateway/**'
+      - '.github/workflows/pr-plan-api-gateway.yml'
 
 jobs:
-  terraform-plan-auth:
-    name: Terraform Plan (Lambda de Autenticação)
+  terraform-plan-api-gateway:
+    name: Terraform Plan (API Gateway)
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 
@@ -35,32 +35,31 @@ jobs:
 
       - name: Configurar Arquivos de Variáveis
         run: |
-          cd infra-auth
-          # A tag da imagem é ignorada pelo lifecycle da função; no plano de PR
-          # serve apenas para satisfazer a variável obrigatória.
-          echo 'account_id = "${{ secrets.AWS_ACCOUNT_ID }}"' > terraform.tfvars
-          echo 'role_name  = "LabRole"' >> terraform.tfvars
-          echo 'image_tag  = "pr-plan"' >> terraform.tfvars
-          echo 'authorizer_image_tag = "pr-plan"' >> terraform.tfvars
-          echo 'db_password = "${{ secrets.DB_PASSWORD }}"' >> terraform.tfvars
-          echo 'jwt_secret  = "${{ secrets.JWT_SECRET }}"' >> terraform.tfvars
+          cd api-gateway
+          # Os valores abaixo só precisam satisfazer as variáveis obrigatórias
+          # para o plano rodar. auth_lambda_name/auth_authorizer_lambda_name
+          # continuam batendo com Lambdas reais, já que alimentam data sources
+          # que o Terraform precisa resolver mesmo em modo plan.
+          echo 'nlb_dns_name                = "pr-plan.placeholder"' > terraform.tfvars
+          echo 'auth_lambda_name             = "ofisy-auth"' >> terraform.tfvars
+          echo 'auth_authorizer_lambda_name  = "ofisy-auth-authorizer"' >> terraform.tfvars
 
           echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
-          echo 'key    = "auth/terraform.tfstate"' >> backend.hcl
+          echo 'key    = "api-gateway/terraform.tfstate"' >> backend.hcl
           echo 'region = "us-east-1"' >> backend.hcl
 
       - name: Terraform Init
         run: |
-          cd infra-auth
+          cd api-gateway
           terraform init -backend-config=backend.hcl
 
       - name: Terraform Plan
         id: plan
         run: |
-          cd infra-auth
+          cd api-gateway
           terraform plan -no-color > plan.txt
 
-          echo "### Planejamento da Lambda de Autenticação (PR)" >> $GITHUB_STEP_SUMMARY
+          echo "### Planejamento do API Gateway (PR)" >> $GITHUB_STEP_SUMMARY
           echo '```terraform' >> $GITHUB_STEP_SUMMARY
           cat plan.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -72,11 +71,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('infra-auth/plan.txt', 'utf8');
+            const plan = fs.readFileSync('api-gateway/plan.txt', 'utf8');
             const maxLen = 65000;
             const safePlan = plan.length > maxLen ? plan.substring(0, maxLen) + '\n...[TRUNCATED]' : plan;
 
-            const output = `#### Terraform Plan - Lambda de Autenticação\n\n<details><summary>Mostrar detalhes do plano de execução</summary>\n\n\`\`\`terraform\n${safePlan}\n\`\`\`\n\n</details>\n\n*Ação rodada pelo commit ${context.sha}*`;
+            const output = `#### Terraform Plan - API Gateway\n\n<details><summary>Mostrar detalhes do plano de execução</summary>\n\n\`\`\`terraform\n${safePlan}\n\`\`\`\n\n</details>\n\n*Ação rodada pelo commit ${context.sha}*`;
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
