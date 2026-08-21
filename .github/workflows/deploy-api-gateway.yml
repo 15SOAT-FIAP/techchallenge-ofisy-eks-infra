@@ -12,6 +12,11 @@ on:
         required: true
         type: string
         default: "ofisy-auth"
+      auth_authorizer_lambda_name:
+        description: "Nome da Lambda Authorizer (valida o token nas rotas protegidas)"
+        required: true
+        type: string
+        default: "ofisy-auth-authorizer"
 
 jobs:
   terraform-api-gateway:
@@ -36,10 +41,16 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Validar Lambda Existente
+      - name: Validar Lambdas Existentes
         run: |
           aws lambda get-function --function-name "${{ inputs.auth_lambda_name }}" --region us-east-1 > /dev/null || {
             echo "Lambda ${{ inputs.auth_lambda_name }} não encontrada."
+            echo "Rode a pipeline 'Deploy Lambda de Autenticação (Terraform)' antes dessa."
+            exit 1
+          }
+
+          aws lambda get-function --function-name "${{ inputs.auth_authorizer_lambda_name }}" --region us-east-1 > /dev/null || {
+            echo "Lambda ${{ inputs.auth_authorizer_lambda_name }} não encontrada."
             echo "Rode a pipeline 'Deploy Lambda de Autenticação (Terraform)' antes dessa."
             exit 1
           }
@@ -48,8 +59,9 @@ jobs:
         run: |
           cd api-gateway
 
-          echo 'nlb_dns_name     = "${{ inputs.nlb_dns_name }}"' > terraform.tfvars
-          echo 'auth_lambda_name = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
+          echo 'nlb_dns_name                = "${{ inputs.nlb_dns_name }}"' > terraform.tfvars
+          echo 'auth_lambda_name             = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
+          echo 'auth_authorizer_lambda_name  = "${{ inputs.auth_authorizer_lambda_name }}"' >> terraform.tfvars
 
           echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
           echo 'key    = "api-gateway/terraform.tfstate"' >> backend.hcl

@@ -8,6 +8,11 @@ on:
         required: true
         type: string
         default: "ofisy-auth"
+      auth_authorizer_lambda_name:
+        description: "Nome da Lambda Authorizer (precisa ainda existir - o destroy avalia o data source)"
+        required: true
+        type: string
+        default: "ofisy-auth-authorizer"
 
 jobs:
   destroy-api-gateway:
@@ -35,8 +40,11 @@ jobs:
       - name: Configurar Arquivos de Variáveis
         run: |
           cd api-gateway
-          echo 'nlb_dns_name     = "destroy"' > terraform.tfvars
-          echo 'auth_lambda_name = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
+          # nlb_dns_name não precisa ser válido para destruir - só compõe uma
+          # string de URI que não chega a ser usada, mas a variável é obrigatória
+          echo 'nlb_dns_name                = "destroy"' > terraform.tfvars
+          echo 'auth_lambda_name             = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
+          echo 'auth_authorizer_lambda_name  = "${{ inputs.auth_authorizer_lambda_name }}"' >> terraform.tfvars
 
           echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
           echo 'key    = "api-gateway/terraform.tfstate"' >> backend.hcl

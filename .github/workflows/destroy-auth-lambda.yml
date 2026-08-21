@@ -32,6 +32,7 @@ jobs:
           echo 'account_id = "${{ secrets.AWS_ACCOUNT_ID }}"' > terraform.tfvars
           echo 'role_name  = "LabRole"' >> terraform.tfvars
           echo 'image_tag  = "destroy"' >> terraform.tfvars
+          echo 'authorizer_image_tag = "destroy"' >> terraform.tfvars
           echo 'db_password = "${{ secrets.DB_PASSWORD }}"' >> terraform.tfvars
           echo 'jwt_secret  = "${{ secrets.JWT_SECRET }}"' >> terraform.tfvars
 

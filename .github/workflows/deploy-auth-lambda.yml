@@ -7,6 +7,10 @@ on:
         description: "Tag da imagem no ECR ofisy-auth (SHA do commit publicado pelo CD do repositório de autenticação)"
         required: true
         type: string
+      authorizer_image_tag:
+        description: "Tag da imagem no ECR ofisy-auth-authorizer (SHA do commit publicado pelo CD do repositório de autenticação)"
+        required: true
+        type: string
 
 jobs:
   terraform-auth-lambda:
@@ -31,7 +35,7 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Validar Imagem no ECR
+      - name: Validar Imagens no ECR
         run: |
           aws ecr describe-images \
             --repository-name ofisy-auth \
@@ -42,12 +46,22 @@ jobs:
               exit 1
             }
 
+          aws ecr describe-images \
+            --repository-name ofisy-auth-authorizer \
+            --image-ids imageTag="${{ inputs.authorizer_image_tag }}" \
+            --region us-east-1 > /dev/null || {
+              echo "Imagem ofisy-auth-authorizer:${{ inputs.authorizer_image_tag }} não encontrada no ECR."
+              echo "Rode o CD do repo techchallenge-ofisy-auth antes dessa pipeline."
+              exit 1
+            }
+
       - name: Configurar Arquivos de Variáveis
         run: |
           cd infra-auth
           echo 'account_id = "${{ secrets.AWS_ACCOUNT_ID }}"' > terraform.tfvars
           echo 'role_name  = "LabRole"' >> terraform.tfvars
           echo 'image_tag  = "${{ inputs.image_tag }}"' >> terraform.tfvars
+          echo 'authorizer_image_tag = "${{ inputs.authorizer_image_tag }}"' >> terraform.tfvars
           echo 'db_password = "${{ secrets.DB_PASSWORD }}"' >> terraform.tfvars
           echo 'jwt_secret  = "${{ secrets.JWT_SECRET }}"' >> terraform.tfvars
 
@@ -76,6 +90,7 @@ jobs:
           terraform apply -auto-approve
 
           LAMBDA_NAME=$(terraform output -raw lambda_function_name)
-          echo "### Lambda de Autenticação Provisionada com Sucesso" >> $GITHUB_STEP_SUMMARY
-          echo "- Função Lambda: $LAMBDA_NAME" >> $GITHUB_STEP_SUMMARY
-          echo "- Imagem: ofisy-auth:${{ inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          AUTHORIZER_NAME=$(terraform output -raw auth_authorizer_function_name)
+          echo "### Lambdas de Autenticação Provisionadas com Sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "- Função Lambda: $LAMBDA_NAME (imagem ofisy-auth:${{ inputs.image_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "- Função Lambda Authorizer: $AUTHORIZER_NAME (imagem ofisy-auth-authorizer:${{ inputs.authorizer_image_tag }})" >> $GITHUB_STEP_SUMMARY

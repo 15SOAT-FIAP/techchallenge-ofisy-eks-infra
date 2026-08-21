@@ -14,7 +14,8 @@ provider "aws" {
 }
 
 locals {
-  project_name  = "ofisy"
-  aws_region    = var.aws_region
-  function_name = "${local.project_name}-auth"
+  project_name              = "ofisy"
+  aws_region                = var.aws_region
+  function_name             = "${local.project_name}-auth"
+  authorizer_function_name  = "${local.project_name}-auth-authorizer"
 }
