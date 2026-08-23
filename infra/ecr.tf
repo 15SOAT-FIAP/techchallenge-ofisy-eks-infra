@@ -35,3 +35,22 @@ resource "aws_ecr_repository" "auth" {
     Name = "${local.project_name}-auth-ecr"
   }
 }
+
+########################################
+# ECR REPOSITORY - LAMBDA CUSTOMERS AUTH AUTHORIZER
+########################################
+
+resource "aws_ecr_repository" "auth_authorizer" {
+  name                 = "${local.project_name}-auth-authorizer"
+  image_tag_mutability = "IMMUTABLE"
+
+  force_delete = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = {
+    Name = "${local.project_name}-auth-authorizer-ecr"
+  }
+}

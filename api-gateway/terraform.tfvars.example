@@ -1,0 +1,2 @@
+nlb_dns_name     = "a1b2c3d4e5f6-1234567890.elb.us-east-1.amazonaws.com"
+auth_lambda_name = "ofisy-auth"
