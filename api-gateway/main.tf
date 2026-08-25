@@ -86,6 +86,22 @@ resource "aws_apigatewayv2_integration" "notifications_service_orders_unread_pro
   payload_format_version = "1.0"
 }
 
+resource "aws_apigatewayv2_integration" "notifications_service_order_by_id_proxy" {
+  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
+  integration_type       = "HTTP_PROXY"
+  integration_method     = "GET"
+  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/notifications/service-orders/{id}"
+  payload_format_version = "1.0"
+}
+
+resource "aws_apigatewayv2_integration" "notifications_service_order_mark_read_proxy" {
+  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
+  integration_type       = "HTTP_PROXY"
+  integration_method     = "PATCH"
+  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/notifications/service-orders/{id}/read"
+  payload_format_version = "1.0"
+}
+
 resource "aws_apigatewayv2_authorizer" "customers_token" {
   api_id                             = aws_apigatewayv2_api.ofisy_gateway.id
   authorizer_type                    = "REQUEST"
@@ -158,6 +174,18 @@ resource "aws_apigatewayv2_route" "notifications_service_orders_unread" {
   api_id    = aws_apigatewayv2_api.ofisy_gateway.id
   route_key = "GET /api/v1/notifications/service-orders/unread"
   target    = "integrations/${aws_apigatewayv2_integration.notifications_service_orders_unread_proxy.id}"
+}
+
+resource "aws_apigatewayv2_route" "notifications_service_order_by_id" {
+  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
+  route_key = "GET /api/v1/notifications/service-orders/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.notifications_service_order_by_id_proxy.id}"
+}
+
+resource "aws_apigatewayv2_route" "notifications_service_order_mark_read" {
+  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
+  route_key = "PATCH /api/v1/notifications/service-orders/{id}/read"
+  target    = "integrations/${aws_apigatewayv2_integration.notifications_service_order_mark_read_proxy.id}"
 }
 
 resource "aws_apigatewayv2_stage" "default" {
