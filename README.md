@@ -18,7 +18,7 @@ O `api-gateway/` é uma terceira camada, separada das outras duas, porque ele de
 
 ## Propósito do Repositório
 
-Isolar e automatizar o provisionamento da infraestrutura de computação em nuvem necessária para suportar a aplicação principal e o banco de dados relacional, além de expor publicamente essa aplicação através de um **API Gateway** que protege, com autenticação via CPF/CNPJ, a rota de consulta de status de ordem de serviço.
+Isolar e automatizar o provisionamento da infraestrutura de computação em nuvem necessária para suportar a aplicação principal e o banco de dados relacional, além de expor publicamente essa aplicação através de um **API Gateway** que protege, com autenticação via CPF/CNPJ, as rotas pensadas para o cliente final (consulta de status, notificações da própria ordem de serviço e aprovação/reprovação de orçamento).
 
 ---
 
@@ -30,7 +30,7 @@ Isolar e automatizar o provisionamento da infraestrutura de computação em nuve
 - **AWS ECR (Elastic Container Registry)**: Registros privados de imagens de container - `ofisy-ecr` (aplicação), `ofisy-auth` (Lambda de emissão de token) e `ofisy-auth-authorizer` (Lambda Authorizer).
 - **AWS Lambda**: Duas funções, empacotadas como imagem de container `arm64`. A de emissão de token roda dentro da VPC (consulta o Postgres); a Authorizer roda fora da VPC (só valida assinatura e expiração do token, sem acessar banco).
 - **AWS API Gateway (HTTP API)**: Porta de entrada pública da aplicação - expõe `POST /auth/customers` e repassa as demais rotas para o EKS.
-- **AWS Lambda Authorizer**: valida o token JWT (HS256) na rota protegida do Gateway. Necessário porque o JWT Authorizer nativo do API Gateway só verifica assinatura assimétrica via JWKS, e este token usa segredo simétrico.
+- **AWS Lambda Authorizer**: valida o token JWT (HS256) nas rotas protegidas do Gateway (status, notificações de OS e aprovação/reprovação de orçamento). Necessário porque o JWT Authorizer nativo do API Gateway só verifica assinatura assimétrica via JWKS, e este token usa segredo simétrico.
 - **AWS IAM**: Gerenciamento de papéis de execução para cluster, worker nodes e Lambdas (compatível com AWS Academy / `LabRole`).
 - **GitHub Actions**: Pipeline automatizada de CI/CD para deploy e destruição da infraestrutura.
 
@@ -92,7 +92,7 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | VPC | tag `ofisy-vpc` | `infra/` | rds-infra, `infra-auth/` |
 | Subnets privadas | tag `ofisy-private-subnet-*` | `infra/` | rds-infra, `infra-auth/` |
 | SG do EKS | tag `ofisy-eks-sg` | `infra/` | rds-infra |
-| SG da Lambda (emissão de token) | tag `ofisy-lambda-auth-sg` | `infra/` | rds-infra*, `infra-auth/` |
+| SG da Lambda (emissão de token) | tag `ofisy-lambda-auth-sg` | `infra/` | rds-infra, `infra-auth/` |
 | ECR da Lambda (emissão de token) | `ofisy-auth` | `infra/` | CD do repo de autenticação, `infra-auth/` |
 | ECR da Lambda (authorizer) | `ofisy-auth-authorizer` | `infra/` | CD do repo de autenticação, `infra-auth/` |
 | Instância RDS | identifier `ofisy-postgres-db` | rds-infra | `infra-auth/` |
@@ -122,17 +122,27 @@ Variáveis relevantes (`infra/variables.tf`):
 Para execução local, preencha essas variáveis no `terraform.tfvars` (veja `terraform.tfvars.example`).
 
 ---
-# API Gateway (validação via CPF/CNPJ)
 
-Provisiona o API Gateway público que expõe `POST /auth/customers` (repassando para a Lambda de emissão de token do repositório `techchallenge-ofisy-auth`), valida o token nas rotas protegidas através de um **Lambda Authorizer** (também no repositório `techchallenge-ofisy-auth`, entrypoint separado), e repassa todas as demais rotas para o app no EKS.
+## API Gateway (validação via CPF/CNPJ)
 
-## Por que um Lambda Authorizer
+O `api-gateway/` expõe `POST /auth/customers` (repassando para a Lambda de emissão de token) e valida, através de um **Lambda Authorizer**, todas as rotas pensadas para o cliente final:
 
-O HTTP API do lab não valida JWT nativamente quando a assinatura é simétrica (HS256) - o "JWT Authorizer" nativo da AWS só verifica assinatura assimétrica, via um endpoint JWKS. Como a Lambda de auth assina o token com HS256, a validação precisa passar por uma Lambda Authorizer própria, aplicada apenas na rota `GET /api/v1/service-orders/{id}/status`. As demais rotas (login, admin, swagger etc.) continuam sendo só repassadas, sem essa camada extra.
+- `GET /api/v1/service-orders/{id}/status`
+- `PATCH /api/v1/service-orders/quote/{id}/approve`
+- `PATCH /api/v1/service-orders/quote/{id}/reprove`
+- `GET /api/v1/notifications/service-orders` (+ `/unread`, `/{id}`, `PATCH /{id}/read`)
 
-## Observação sobre a validação
+Todas usam o **mesmo** `aws_apigatewayv2_authorizer` (`customers_token`) - um authorizer não é exclusivo de uma rota, então nenhuma Lambda ou permissão extra é criada por rota.
 
-A validação do token acontece **só no Gateway** (Lambda Authorizer) - o app Spring Boot (`techchallenge-ofisy`) não valida esse token, a rota continua nos `public-paths` dele. Como o NLB do EKS é público, isso significa que alguém que descubra o DNS do NLB e chame ele direto (sem passar pelo Gateway) ainda acessaria a rota sem autenticação.
+As notificações de **estoque** (`/api/v1/notifications/stock/*`) ficam de fora de propósito: são operação interna de staff (papel `STOCKMAN`), resolvida dentro do app via JWT de staff - não fazem parte da jornada do cliente final. As demais rotas (login, admin, swagger etc.) também continuam sendo só repassadas pelo Gateway, sem essa camada extra.
+
+### Por que um Lambda Authorizer
+
+O HTTP API do lab não valida JWT nativamente quando a assinatura é simétrica (HS256) - o "JWT Authorizer" nativo da AWS só verifica assinatura assimétrica, via um endpoint JWKS. Como a Lambda de auth assina o token com HS256, a validação precisa passar por uma Lambda Authorizer própria.
+
+### Observação sobre a validação
+
+A validação do token acontece **só no Gateway** (Lambda Authorizer) - o app Spring Boot (`techchallenge-ofisy`) não valida esse token; todas as rotas acima continuam nos `public-paths` dele. Como o NLB do EKS é público, isso significa que alguém que descubra o DNS do NLB e chame ele direto (sem passar pelo Gateway) ainda acessaria essas rotas sem autenticação. Decisão consciente do time, documentada aqui para referência futura.
 
 ---
 
@@ -162,9 +172,9 @@ O `api-gateway/` não usa nenhum secret adicional: os valores que variam (`nlb_d
 2. Selecione a pipeline **`Deploy EKS Infrastructure (Terraform)`** e clique em **Run workflow**, escolhendo a branch desejada. Esta é a **etapa 1** do fluxo.
 3. Depois que o RDS e as imagens das Lambdas estiverem prontos (etapas 2 e 3), selecione **`Deploy Lambda de Autenticação (Terraform)`** e clique em **Run workflow**, informando em `image_tag` e `authorizer_image_tag` os SHAs dos commits publicados no ECR pelo CD do repositório de autenticação. Esta é a **etapa 4**.
 4. Depois que a aplicação (`techchallenge-ofisy`) já tiver sido deployada no cluster (etapa 5, cria o NLB), selecione **`Deploy API Gateway (Terraform)`** e clique em **Run workflow**, informando:
-    - `nlb_dns_name`: `kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'`
-    - `auth_lambda_name`: nome da função de emissão de token (padrão `ofisy-auth`)
-    - `auth_authorizer_lambda_name`: nome da função authorizer (padrão `ofisy-auth-authorizer`)
+   - `nlb_dns_name`: `kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'`
+   - `auth_lambda_name`: nome da função de emissão de token (padrão `ofisy-auth`)
+   - `auth_authorizer_lambda_name`: nome da função authorizer (padrão `ofisy-auth-authorizer`)
 
    Esta é a **etapa 6**, a última do fluxo.
 
