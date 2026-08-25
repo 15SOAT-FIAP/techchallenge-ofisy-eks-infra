@@ -122,6 +122,19 @@ Variáveis relevantes (`infra/variables.tf`):
 Para execução local, preencha essas variáveis no `terraform.tfvars` (veja `terraform.tfvars.example`).
 
 ---
+# API Gateway (validação via CPF/CNPJ)
+
+Provisiona o API Gateway público que expõe `POST /auth/customers` (repassando para a Lambda de emissão de token do repositório `techchallenge-ofisy-auth`), valida o token nas rotas protegidas através de um **Lambda Authorizer** (também no repositório `techchallenge-ofisy-auth`, entrypoint separado), e repassa todas as demais rotas para o app no EKS.
+
+## Por que um Lambda Authorizer
+
+O HTTP API do lab não valida JWT nativamente quando a assinatura é simétrica (HS256) - o "JWT Authorizer" nativo da AWS só verifica assinatura assimétrica, via um endpoint JWKS. Como a Lambda de auth assina o token com HS256, a validação precisa passar por uma Lambda Authorizer própria, aplicada apenas na rota `GET /api/v1/service-orders/{id}/status`. As demais rotas (login, admin, swagger etc.) continuam sendo só repassadas, sem essa camada extra.
+
+## Observação sobre a validação
+
+A validação do token acontece **só no Gateway** (Lambda Authorizer) - o app Spring Boot (`techchallenge-ofisy`) não valida esse token, a rota continua nos `public-paths` dele. Como o NLB do EKS é público, isso significa que alguém que descubra o DNS do NLB e chame ele direto (sem passar pelo Gateway) ainda acessaria a rota sem autenticação.
+
+---
 
 ## Configuração de Secrets no GitHub
 

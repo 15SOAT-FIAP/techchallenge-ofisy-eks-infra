@@ -40,8 +40,6 @@ jobs:
       - name: Configurar Arquivos de Variáveis
         run: |
           cd api-gateway
-          # nlb_dns_name não precisa ser válido para destruir - só compõe uma
-          # string de URI que não chega a ser usada, mas a variável é obrigatória
           echo 'nlb_dns_name                = "destroy"' > terraform.tfvars
           echo 'auth_lambda_name             = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
           echo 'auth_authorizer_lambda_name  = "${{ inputs.auth_authorizer_lambda_name }}"' >> terraform.tfvars
