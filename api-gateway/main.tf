@@ -165,27 +165,35 @@ resource "aws_apigatewayv2_route" "default_proxy" {
 }
 
 resource "aws_apigatewayv2_route" "notifications_service_orders" {
-  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key = "GET /api/v1/notifications/service-orders"
-  target    = "integrations/${aws_apigatewayv2_integration.notifications_service_orders_proxy.id}"
+  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
+  route_key          = "GET /api/v1/notifications/service-orders"
+  target             = "integrations/${aws_apigatewayv2_integration.notifications_service_orders_proxy.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
 
 resource "aws_apigatewayv2_route" "notifications_service_orders_unread" {
-  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key = "GET /api/v1/notifications/service-orders/unread"
-  target    = "integrations/${aws_apigatewayv2_integration.notifications_service_orders_unread_proxy.id}"
+  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
+  route_key          = "GET /api/v1/notifications/service-orders/unread"
+  target             = "integrations/${aws_apigatewayv2_integration.notifications_service_orders_unread_proxy.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
 
 resource "aws_apigatewayv2_route" "notifications_service_order_by_id" {
-  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key = "GET /api/v1/notifications/service-orders/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.notifications_service_order_by_id_proxy.id}"
+  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
+  route_key          = "GET /api/v1/notifications/service-orders/{id}"
+  target             = "integrations/${aws_apigatewayv2_integration.notifications_service_order_by_id_proxy.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
 
 resource "aws_apigatewayv2_route" "notifications_service_order_mark_read" {
-  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key = "PATCH /api/v1/notifications/service-orders/{id}/read"
-  target    = "integrations/${aws_apigatewayv2_integration.notifications_service_order_mark_read_proxy.id}"
+  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
+  route_key          = "PATCH /api/v1/notifications/service-orders/{id}/read"
+  target             = "integrations/${aws_apigatewayv2_integration.notifications_service_order_mark_read_proxy.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
 
 resource "aws_apigatewayv2_stage" "default" {
