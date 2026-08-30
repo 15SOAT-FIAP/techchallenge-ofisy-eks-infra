@@ -12,13 +12,13 @@ O repositório contém **três camadas independentes**, cada uma com seu própri
 
 A separação entre `infra/` e `infra-auth/` existe porque a Lambda depende do RDS, que é provisionado em [outro repositório](https://github.com/15SOAT-FIAP/techchallenge-ofisy-rds-infra), e esse repo depende da rede criada aqui - manter tudo em um único state fecharia um ciclo entre os dois repositórios, impossibilitando o provisionamento a partir de uma conta vazia.
 
-O `api-gateway/` é uma terceira camada, separada das outras duas, porque ele depende do **NLB da aplicação** (repositório `techchallenge-ofisy`), que só existe depois que o app já foi deployado no cluster - ou seja, depois de tudo o mais.
+O `api-gateway/` é uma terceira camada, separada das outras duas, porque ele depende do **NLB da aplicação** (repositório `techchallenge-ofisy`), que só existe depois que o app já foi deployado no cluster - ou seja, depois de tudo o mais. Esse NLB é **interno** (sem IP público) - o API Gateway alcança ele via **VPC Link**, e é o único ponto de entrada público de toda a aplicação.
 
 ---
 
 ## Propósito do Repositório
 
-Isolar e automatizar o provisionamento da infraestrutura de computação em nuvem necessária para suportar a aplicação principal e o banco de dados relacional, além de expor publicamente essa aplicação através de um **API Gateway** que protege, com autenticação via CPF/CNPJ, as rotas pensadas para o cliente final (consulta de status, notificações da própria ordem de serviço e aprovação/reprovação de orçamento).
+Isolar e automatizar o provisionamento da infraestrutura de computação em nuvem necessária para suportar a aplicação principal e o banco de dados relacional, além de expor publicamente essa aplicação através de um **API Gateway** que protege, com autenticação via CPF/CNPJ, as rotas pensadas para o cliente final (consulta de status, notificações da própria ordem de serviço e aprovação/reprovação de orçamento). Com o NLB do EKS interno, o Gateway é o **único ponto de entrada público** de toda a aplicação.
 
 ---
 
@@ -29,7 +29,8 @@ Isolar e automatizar o provisionamento da infraestrutura de computação em nuve
 - **AWS VPC & Networking**: Subnets públicas/privadas, Internet Gateway, NAT Gateway e Tabela de Roteamento.
 - **AWS ECR (Elastic Container Registry)**: Registros privados de imagens de container - `ofisy-ecr` (aplicação), `ofisy-auth` (Lambda de emissão de token) e `ofisy-auth-authorizer` (Lambda Authorizer).
 - **AWS Lambda**: Duas funções, empacotadas como imagem de container `arm64`. A de emissão de token roda dentro da VPC (consulta o Postgres); a Authorizer roda fora da VPC (só valida assinatura e expiração do token, sem acessar banco).
-- **AWS API Gateway (HTTP API)**: Porta de entrada pública da aplicação - expõe `POST /auth/customers` e repassa as demais rotas para o EKS.
+- **AWS API Gateway (HTTP API)**: Porta de entrada pública da aplicação - expõe `POST /auth/customers` e repassa as demais rotas para o EKS via VPC Link.
+- **AWS VPC Link**: permite o API Gateway (que roda fora da VPC) alcançar o NLB interno na subnet privada. Sem ele, o Gateway não teria como chegar num NLB sem IP público.
 - **AWS Lambda Authorizer**: valida o token JWT (HS256) nas rotas protegidas do Gateway (status, notificações de OS e aprovação/reprovação de orçamento). Necessário porque o JWT Authorizer nativo do API Gateway só verifica assinatura assimétrica via JWKS, e este token usa segredo simétrico.
 - **AWS IAM**: Gerenciamento de papéis de execução para cluster, worker nodes e Lambdas (compatível com AWS Academy / `LabRole`).
 - **GitHub Actions**: Pipeline automatizada de CI/CD para deploy e destruição da infraestrutura.
@@ -42,19 +43,19 @@ Isolar e automatizar o provisionamento da infraestrutura de computação em nuve
 AWS Cloud (us-east-1)
  └── VPC (10.0.0.0/16)
       ├── Internet Gateway (IGW) & NAT Gateway (com Elastic IP)
-      ├── Subnet Pública A (10.0.1.0/24 - us-east-1a) ── [ALB Load Balancer / Ingress]
-      ├── Subnet Pública B (10.0.4.0/24 - us-east-1b) ── [ALB Load Balancer / Ingress]
-      ├── Subnet Privada A (10.0.2.0/24 - us-east-1a) ── [EKS Worker Nodes / Pods / Lambda de auth]
-      └── Subnet Privada B (10.0.3.0/24 - us-east-1b) ── [EKS Worker Nodes / Pods / Lambda de auth]
+      ├── Subnet Pública A (10.0.1.0/24 - us-east-1a)
+      ├── Subnet Pública B (10.0.4.0/24 - us-east-1b)
+      ├── Subnet Privada A (10.0.2.0/24 - us-east-1a) ── [EKS Worker Nodes / Pods / Lambda de auth / NLB interno / VPC Link]
+      └── Subnet Privada B (10.0.3.0/24 - us-east-1b) ── [EKS Worker Nodes / Pods / Lambda de auth / NLB interno / VPC Link]
 ```
 
-A Lambda Authorizer não aparece nesse diagrama porque não roda dentro da VPC.
+O NLB da aplicação é interno (sem IP público) - só é alcançável de dentro da VPC. O API Gateway, que roda fora da VPC, chega até ele através de um VPC Link (ENIs provisionadas nas subnets privadas acima). A Lambda Authorizer não aparece nesse diagrama porque não roda dentro da VPC.
 
 ---
 
 ## Ordem de Execução entre os Repositórios
 
-A infraestrutura da Fase 3 está distribuída em quatro repositórios que se conectam por **Data Sources** (busca por tag ou por nome) ou por **variáveis passadas manualmente** - como o DNS do NLB, que muda a cada deploy da aplicação e não tem uma tag fixa pra buscar. Nunca por referência direta de recurso (remote state). Isso significa que a ordem abaixo precisa ser respeitada: cada etapa só encontra o que a anterior criou.
+A infraestrutura da Fase 3 está distribuída em quatro repositórios que se conectam por **Data Sources** (busca por tag ou por nome) ou por **variáveis passadas manualmente** - como o ARN do Listener do NLB, que muda a cada vez que o `Service` do Kubernetes é recriado e não tem uma tag fixa pra buscar (o NLB é criado pelo Kubernetes, não pelo Terraform). Nunca por referência direta de recurso (remote state). Isso significa que a ordem abaixo precisa ser respeitada: cada etapa só encontra o que a anterior criou.
 
 ```mermaid
 flowchart TD
@@ -77,7 +78,7 @@ Cada etapa só pode rodar depois que a anterior terminou. A tabela abaixo detalh
 | **3** | VPC, subnets privadas e Security Groups da etapa 1 |
 | **4** | O banco da etapa 3, as imagens da etapa 2 e os Security Groups da etapa 1 |
 | **5** | O cluster EKS e o ECR da etapa 1, e o banco da etapa 3 |
-| **6** | As duas funções Lambda da etapa 4 e o NLB criado na etapa 5 |
+| **6** | As duas funções Lambda da etapa 4 e o ARN do Listener do NLB (interno) criado na etapa 5 |
 
 As etapas **2 e 3 não dependem uma da outra** - podem ser invertidas ou executadas em paralelo, desde que ambas terminem antes da etapa 4. Dentro da etapa 2, publicar as duas imagens (emissão de token e authorizer) também não tem ordem entre si.
 
@@ -98,7 +99,7 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | Instância RDS | identifier `ofisy-postgres-db` | rds-infra | `infra-auth/` |
 | Função Lambda (emissão de token) | `ofisy-auth` | `infra-auth/` | `api-gateway/` |
 | Função Lambda (authorizer) | `ofisy-auth-authorizer` | `infra-auth/` | `api-gateway/` |
-| NLB da aplicação | DNS informado manualmente (var `nlb_dns_name`) | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
+| NLB da aplicação (interno) | ARN do Listener, informado manualmente (var `nlb_listener_arn`) | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
 
 O Security Group da Lambda é criado em `infra/`, e não junto da função, justamente para que o rds-infra consiga liberar a porta 5432 a partir dele sem depender do state da Lambda.
 
@@ -140,9 +141,25 @@ As notificações de **estoque** (`/api/v1/notifications/stock/*`) ficam de fora
 
 O HTTP API do lab não valida JWT nativamente quando a assinatura é simétrica (HS256) - o "JWT Authorizer" nativo da AWS só verifica assinatura assimétrica, via um endpoint JWKS. Como a Lambda de auth assina o token com HS256, a validação precisa passar por uma Lambda Authorizer própria.
 
+### NLB interno + VPC Link
+
+O NLB do EKS é **interno** (sem IP público) - o único ponto de entrada público de toda a aplicação passa a ser o próprio API Gateway. Como o Gateway roda fora da VPC, ele alcança o NLB através de um `aws_apigatewayv2_vpc_link`, com ENIs provisionadas nas subnets privadas.
+
+Uma NLB opera na camada 4 (TCP puro) - não entende path de URL. Por isso a integração via VPC Link (`connection_type = "VPC_LINK"`) aponta pro **ARN do Listener** da NLB, não pra uma URL com path embutido. Consequência direta: existe **uma única integração** (`nlb_proxy`) compartilhada por todas as rotas que vão pro app - o path original da requisição passa direto, e quem continua diferenciando cada rota é só a presença (ou não) de `authorization_type`/`authorizer_id`.
+
+Como o NLB é criado pelo Kubernetes (não pelo Terraform), o ARN do Listener não é descobrível via `data source` - precisa ser obtido manualmente a cada vez que o `Service` é recriado:
+
+```bash
+NLB_DNS=$(kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+NLB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$NLB_DNS'].LoadBalancerArn" --output text)
+aws elbv2 describe-listeners --load-balancer-arn $NLB_ARN --query "Listeners[?Port==\`8080\`].ListenerArn" --output text
+```
+
+**Pendência conhecida**: o header `X-Customer-Id` (usado para filtrar notificações de OS por cliente) não é mais injetado pela integração - decisão de escopo, não esquecimento. Enquanto isso não for retomado, as 4 rotas de `/api/v1/notifications/service-orders/*` respondem `400` (o controller do app exige esse header).
+
 ### Observação sobre a validação
 
-A validação do token acontece **só no Gateway** (Lambda Authorizer) - o app Spring Boot (`techchallenge-ofisy`) não valida esse token; todas as rotas acima continuam nos `public-paths` dele. Como o NLB do EKS é público, isso significa que alguém que descubra o DNS do NLB e chame ele direto (sem passar pelo Gateway) ainda acessaria essas rotas sem autenticação. Decisão consciente do time, documentada aqui para referência futura.
+A validação do token acontece **só no Gateway** (Lambda Authorizer) - o app Spring Boot (`techchallenge-ofisy`) não valida esse token; todas as rotas acima continuam nos `public-paths` dele. Isso deixou de ser um problema de segurança a partir do momento em que o NLB ficou interno: não existe mais nenhum caminho de acesso à aplicação que não passe pelo Gateway.
 
 ---
 
@@ -160,7 +177,7 @@ Os secrets são definidos como **Organization Secrets** na org `15SOAT-FIAP`, de
 | `JWT_SECRET` | Segredo de assinatura do JWT. Precisa ser idêntico entre a Lambda que assina (emissão de token) e a Lambda que valida (authorizer) - o app Spring Boot não participa mais dessa validação |
 | `DD_API_KEY`            | API Key do Datadog, usada pelo Datadog Agent instalado no cluster EKS para enviar métricas          |
 
-O `api-gateway/` não usa nenhum secret adicional: os valores que variam (`nlb_dns_name`, `auth_lambda_name`, `auth_authorizer_lambda_name`) são informados como input do `workflow_dispatch`, não como secret.
+O `api-gateway/` não usa nenhum secret adicional: os valores que variam (`nlb_listener_arn`, `auth_lambda_name`, `auth_authorizer_lambda_name`) são informados como input do `workflow_dispatch`, não como secret.
 
 ---
 
@@ -171,8 +188,8 @@ O `api-gateway/` não usa nenhum secret adicional: os valores que variam (`nlb_d
 1. Vá até a aba **Actions** do repositório no GitHub.
 2. Selecione a pipeline **`Deploy EKS Infrastructure (Terraform)`** e clique em **Run workflow**, escolhendo a branch desejada. Esta é a **etapa 1** do fluxo.
 3. Depois que o RDS e as imagens das Lambdas estiverem prontos (etapas 2 e 3), selecione **`Deploy Lambda de Autenticação (Terraform)`** e clique em **Run workflow**, informando em `image_tag` e `authorizer_image_tag` os SHAs dos commits publicados no ECR pelo CD do repositório de autenticação. Esta é a **etapa 4**.
-4. Depois que a aplicação (`techchallenge-ofisy`) já tiver sido deployada no cluster (etapa 5, cria o NLB), selecione **`Deploy API Gateway (Terraform)`** e clique em **Run workflow**, informando:
-   - `nlb_dns_name`: `kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'`
+4. Depois que a aplicação (`techchallenge-ofisy`) já tiver sido deployada no cluster (etapa 5, cria o NLB interno), obtenha o ARN do Listener (comandos na seção "NLB interno + VPC Link", acima) e selecione **`Deploy API Gateway (Terraform)`**, informando:
+   - `nlb_listener_arn`: ARN do Listener :8080 do NLB
    - `auth_lambda_name`: nome da função de emissão de token (padrão `ofisy-auth`)
    - `auth_authorizer_lambda_name`: nome da função authorizer (padrão `ofisy-auth-authorizer`)
 
@@ -236,7 +253,7 @@ O deploy de código das Lambdas **não passa pelo Terraform**: o campo `image_ur
 
 #### 4. Camada do API Gateway (`api-gateway/`)
 
-Execute somente após as duas Lambdas existirem e a aplicação já ter sido deployada no cluster (para o NLB existir):
+Execute somente após as duas Lambdas existirem e a aplicação já ter sido deployada no cluster (para o NLB interno existir):
 
 ```bash
 cd api-gateway
@@ -244,9 +261,10 @@ cd api-gateway
 cp terraform.tfvars.example terraform.tfvars
 cp backend.hcl.example backend.hcl
 
-# Preencha nlb_dns_name, auth_lambda_name e auth_authorizer_lambda_name
-# no terraform.tfvars, e o bucket no backend.hcl
-# (a key deve ser api-gateway/terraform.tfstate)
+# Preencha nlb_listener_arn, auth_lambda_name e auth_authorizer_lambda_name
+# no terraform.tfvars (comandos pra obter o ARN na seção "NLB interno +
+# VPC Link", acima), e o bucket no backend.hcl (a key deve ser
+# api-gateway/terraform.tfstate)
 
 terraform init -backend-config=backend.hcl
 terraform plan
