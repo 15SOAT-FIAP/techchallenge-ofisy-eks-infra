@@ -32,10 +32,10 @@ resource "helm_release" "datadog" {
           enabled             = true
           containerCollectAll = true
         }
-        # APM via Unix Domain Socket (recomendado no k8s); hostPort TCP fica desligado.
+        # APM via hostPort TCP (usado pela app via DD_AGENT_HOST=status.hostIP:8126).
         apm = {
-          portEnabled   = false
-          socketEnabled = true
+          portEnabled   = true
+          socketEnabled = false
         }
         processAgent = {
           enabled           = false
