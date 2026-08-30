@@ -17,6 +17,73 @@ locals {
   project_name = "ofisy"
 }
 
+data "aws_vpc" "main" {
+  filter {
+    name   = "tag:Name"
+    values = ["${local.project_name}-vpc"]
+  }
+}
+
+data "aws_subnets" "private" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.main.id]
+  }
+
+  filter {
+    name   = "tag:Name"
+    values = ["${local.project_name}-private-subnet-*"]
+  }
+}
+
+data "aws_security_group" "eks" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.main.id]
+  }
+
+  filter {
+    name   = "tag:Name"
+    values = ["${local.project_name}-eks-sg"]
+  }
+}
+
+########################################
+# VPC LINK
+########################################
+
+resource "aws_security_group" "vpc_link" {
+  name        = "${local.project_name}-api-gateway-vpc-link-sg"
+  description = "Security Group das ENIs do VPC Link do API Gateway"
+  vpc_id      = data.aws_vpc.main.id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${local.project_name}-api-gateway-vpc-link-sg"
+  }
+}
+
+resource "aws_security_group_rule" "eks_from_vpc_link" {
+  type                     = "ingress"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.vpc_link.id
+  security_group_id        = data.aws_security_group.eks.id
+}
+
+resource "aws_apigatewayv2_vpc_link" "ofisy" {
+  name               = "${local.project_name}-vpc-link"
+  security_group_ids = [aws_security_group.vpc_link.id]
+  subnet_ids         = data.aws_subnets.private.ids
+}
+
 data "aws_lambda_function" "auth" {
   function_name = var.auth_lambda_name
 }
@@ -25,10 +92,14 @@ data "aws_lambda_function" "authorizer" {
   function_name = var.auth_authorizer_lambda_name
 }
 
+########################################
+# API GATEWAY (HTTP API)
+########################################
+
 resource "aws_apigatewayv2_api" "ofisy_gateway" {
   name          = "${local.project_name}-api-gateway"
   protocol_type = "HTTP"
-  description   = "Gateway publico da aplicacao Ofisy - expoe /auth/customers e repassa as demais rotas para o app no EKS"
+  description   = "Gateway publico da aplicacao Ofisy - unico ponto de entrada, ja que o NLB agora e interno"
 }
 
 resource "aws_apigatewayv2_integration" "auth_integration" {
@@ -38,69 +109,19 @@ resource "aws_apigatewayv2_integration" "auth_integration" {
   payload_format_version = "2.0"
 }
 
-resource "aws_apigatewayv2_integration" "service_order_status_proxy" {
-  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
-  integration_type       = "HTTP_PROXY"
-  integration_method     = "GET"
-  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/service-orders/{id}/status"
-  payload_format_version = "1.0"
-}
-
-resource "aws_apigatewayv2_integration" "quote_approve_proxy" {
-  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
-  integration_type       = "HTTP_PROXY"
-  integration_method     = "PATCH"
-  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/service-orders/quote/{id}/approve"
-  payload_format_version = "1.0"
-}
-
-resource "aws_apigatewayv2_integration" "quote_reprove_proxy" {
-  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
-  integration_type       = "HTTP_PROXY"
-  integration_method     = "PATCH"
-  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/service-orders/quote/{id}/reprove"
-  payload_format_version = "1.0"
-}
-
-resource "aws_apigatewayv2_integration" "default_proxy" {
+resource "aws_apigatewayv2_integration" "nlb_proxy" {
   api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
   integration_type       = "HTTP_PROXY"
   integration_method     = "ANY"
-  integration_uri        = "http://${var.nlb_dns_name}:8080/{proxy}"
+  connection_type        = "VPC_LINK"
+  connection_id          = aws_apigatewayv2_vpc_link.ofisy.id
+  integration_uri        = var.nlb_listener_arn
   payload_format_version = "1.0"
 }
 
-resource "aws_apigatewayv2_integration" "notifications_service_orders_proxy" {
-  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
-  integration_type       = "HTTP_PROXY"
-  integration_method     = "GET"
-  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/notifications/service-orders"
-  payload_format_version = "1.0"
-}
-
-resource "aws_apigatewayv2_integration" "notifications_service_orders_unread_proxy" {
-  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
-  integration_type       = "HTTP_PROXY"
-  integration_method     = "GET"
-  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/notifications/service-orders/unread"
-  payload_format_version = "1.0"
-}
-
-resource "aws_apigatewayv2_integration" "notifications_service_order_by_id_proxy" {
-  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
-  integration_type       = "HTTP_PROXY"
-  integration_method     = "GET"
-  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/notifications/service-orders/{id}"
-  payload_format_version = "1.0"
-}
-
-resource "aws_apigatewayv2_integration" "notifications_service_order_mark_read_proxy" {
-  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
-  integration_type       = "HTTP_PROXY"
-  integration_method     = "PATCH"
-  integration_uri        = "http://${var.nlb_dns_name}:8080/api/v1/notifications/service-orders/{id}/read"
-  payload_format_version = "1.0"
-}
+########################################
+# LAMBDA AUTHORIZER
+########################################
 
 resource "aws_apigatewayv2_authorizer" "customers_token" {
   api_id                             = aws_apigatewayv2_api.ofisy_gateway.id
@@ -111,6 +132,10 @@ resource "aws_apigatewayv2_authorizer" "customers_token" {
   authorizer_payload_format_version  = "2.0"
   enable_simple_responses            = true
 }
+
+########################################
+# PERMISSOES - autoriza o API Gateway a invocar as Lambdas do outro repo
+########################################
 
 resource "aws_lambda_permission" "allow_apigw_invoke_auth" {
   statement_id  = "AllowAPIGatewayInvokeAuth"
@@ -128,6 +153,10 @@ resource "aws_lambda_permission" "allow_apigw_invoke_authorizer" {
   source_arn    = "${aws_apigatewayv2_api.ofisy_gateway.execution_arn}/*/*"
 }
 
+########################################
+# ROTAS
+########################################
+
 resource "aws_apigatewayv2_route" "auth_customers" {
   api_id    = aws_apigatewayv2_api.ofisy_gateway.id
   route_key = "POST /auth/customers"
@@ -137,7 +166,7 @@ resource "aws_apigatewayv2_route" "auth_customers" {
 resource "aws_apigatewayv2_route" "service_order_status" {
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = "GET /api/v1/service-orders/{id}/status"
-  target             = "integrations/${aws_apigatewayv2_integration.service_order_status_proxy.id}"
+  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
@@ -145,7 +174,7 @@ resource "aws_apigatewayv2_route" "service_order_status" {
 resource "aws_apigatewayv2_route" "quote_approve" {
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = "PATCH /api/v1/service-orders/quote/{id}/approve"
-  target             = "integrations/${aws_apigatewayv2_integration.quote_approve_proxy.id}"
+  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
@@ -153,21 +182,15 @@ resource "aws_apigatewayv2_route" "quote_approve" {
 resource "aws_apigatewayv2_route" "quote_reprove" {
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = "PATCH /api/v1/service-orders/quote/{id}/reprove"
-  target             = "integrations/${aws_apigatewayv2_integration.quote_reprove_proxy.id}"
+  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
-}
-
-resource "aws_apigatewayv2_route" "default_proxy" {
-  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key = "ANY /{proxy+}"
-  target    = "integrations/${aws_apigatewayv2_integration.default_proxy.id}"
 }
 
 resource "aws_apigatewayv2_route" "notifications_service_orders" {
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = "GET /api/v1/notifications/service-orders"
-  target             = "integrations/${aws_apigatewayv2_integration.notifications_service_orders_proxy.id}"
+  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
@@ -175,7 +198,7 @@ resource "aws_apigatewayv2_route" "notifications_service_orders" {
 resource "aws_apigatewayv2_route" "notifications_service_orders_unread" {
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = "GET /api/v1/notifications/service-orders/unread"
-  target             = "integrations/${aws_apigatewayv2_integration.notifications_service_orders_unread_proxy.id}"
+  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
@@ -183,7 +206,7 @@ resource "aws_apigatewayv2_route" "notifications_service_orders_unread" {
 resource "aws_apigatewayv2_route" "notifications_service_order_by_id" {
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = "GET /api/v1/notifications/service-orders/{id}"
-  target             = "integrations/${aws_apigatewayv2_integration.notifications_service_order_by_id_proxy.id}"
+  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
 }
@@ -191,9 +214,15 @@ resource "aws_apigatewayv2_route" "notifications_service_order_by_id" {
 resource "aws_apigatewayv2_route" "notifications_service_order_mark_read" {
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = "PATCH /api/v1/notifications/service-orders/{id}/read"
-  target             = "integrations/${aws_apigatewayv2_integration.notifications_service_order_mark_read_proxy.id}"
+  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
+}
+
+resource "aws_apigatewayv2_route" "default_proxy" {
+  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
+  route_key = "ANY /{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
 }
 
 resource "aws_apigatewayv2_stage" "default" {

@@ -4,14 +4,16 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "nlb_dns_name" {
+variable "nlb_listener_arn" {
   description = <<-EOT
-    DNS publico do NLB criado pelo Service (type: LoadBalancer) do Kubernetes,
-    no repositorio da aplicacao. Obtenha com:
-      kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-    So existe DEPOIS que o k8s/service.yml ja foi aplicado no cluster - por isso
-    este e um estagio Terraform separado de infra/ e infra-auth/, aplicado
-    manualmente depois dos dois.
+    ARN do Listener (porta 8080) do NLB interno criado pelo Service (type:
+    LoadBalancer) do Kubernetes. Como o NLB e criado pelo Kubernetes, e nao
+    pelo Terraform, esse ARN precisa ser obtido manualmente apos o deploy
+    do app:
+
+      NLB_DNS=$(kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+      NLB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$NLB_DNS'].LoadBalancerArn" --output text)
+      aws elbv2 describe-listeners --load-balancer-arn $NLB_ARN --query "Listeners[?Port==\`8080\`].ListenerArn" --output text
   EOT
   type        = string
 }

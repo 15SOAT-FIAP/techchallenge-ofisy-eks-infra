@@ -36,7 +36,7 @@ jobs:
       - name: Configurar Arquivos de Variáveis
         run: |
           cd api-gateway
-          echo 'nlb_dns_name                = "pr-plan.placeholder"' > terraform.tfvars
+          echo 'nlb_listener_arn            = "arn:aws:elasticloadbalancing:us-east-1:000000000000:listener/net/pr-plan/0000000000000000/0000000000000000"' > terraform.tfvars
           echo 'auth_lambda_name             = "ofisy-auth"' >> terraform.tfvars
           echo 'auth_authorizer_lambda_name  = "ofisy-auth-authorizer"' >> terraform.tfvars
 
