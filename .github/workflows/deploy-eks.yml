@@ -8,6 +8,10 @@ jobs:
     name: Provisionar Cluster EKS & Rede (Terraform)
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
+    
+    concurrency:
+      group: deploy-eks
+      cancel-in-progress: false
 
     steps:
       - name: Checkout do código

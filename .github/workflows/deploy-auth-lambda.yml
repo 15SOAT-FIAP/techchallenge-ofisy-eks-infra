@@ -17,13 +17,17 @@ jobs:
     name: Provisionar Lambda de Autenticação (Terraform)
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
+    
+    concurrency:
+      group: deploy-auth-lambda
+      cancel-in-progress: false
 
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Configurar Credenciais AWS
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -31,7 +35,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Configurar Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
@@ -56,14 +60,19 @@ jobs:
             }
 
       - name: Configurar Arquivos de Variáveis
+        env:
+          DB_PASS: ${{ secrets.DB_PASSWORD }}
+          JWT_SEC: ${{ secrets.JWT_SECRET }}
         run: |
+          echo "::add-mask::$DB_PASS"
+          echo "::add-mask::$JWT_SEC"
           cd infra-auth
           echo 'account_id = "${{ secrets.AWS_ACCOUNT_ID }}"' > terraform.tfvars
           echo 'role_name  = "LabRole"' >> terraform.tfvars
           echo 'image_tag  = "${{ inputs.image_tag }}"' >> terraform.tfvars
           echo 'authorizer_image_tag = "${{ inputs.authorizer_image_tag }}"' >> terraform.tfvars
-          echo 'db_password = "${{ secrets.DB_PASSWORD }}"' >> terraform.tfvars
-          echo 'jwt_secret  = "${{ secrets.JWT_SECRET }}"' >> terraform.tfvars
+          echo "db_password = \"$DB_PASS\"" >> terraform.tfvars
+          echo "jwt_secret  = \"$JWT_SEC\"" >> terraform.tfvars
 
           echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
           echo 'key    = "auth/terraform.tfstate"' >> backend.hcl
