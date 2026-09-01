@@ -23,6 +23,10 @@ jobs:
     name: Provisionar API Gateway (Terraform)
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
+    
+    concurrency:
+      group: deploy-apigw
+      cancel-in-progress: false
 
     steps:
       - name: Checkout do código
