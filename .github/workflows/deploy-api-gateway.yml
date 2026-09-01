@@ -3,8 +3,8 @@ name: Deploy API Gateway (Terraform)
 on:
   workflow_dispatch:
     inputs:
-      nlb_dns_name:
-        description: "DNS do NLB (kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+      nlb_listener_arn:
+        description: "ARN do Listener :8080 do NLB interno (ver comentário em variables.tf para o comando de obtenção)"
         required: true
         type: string
       auth_lambda_name:
@@ -63,7 +63,7 @@ jobs:
         run: |
           cd api-gateway
 
-          echo 'nlb_dns_name                = "${{ inputs.nlb_dns_name }}"' > terraform.tfvars
+          echo 'nlb_listener_arn             = "${{ inputs.nlb_listener_arn }}"' > terraform.tfvars
           echo 'auth_lambda_name             = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
           echo 'auth_authorizer_lambda_name  = "${{ inputs.auth_authorizer_lambda_name }}"' >> terraform.tfvars
 
