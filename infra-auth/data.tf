@@ -49,13 +49,3 @@ data "aws_ecr_repository" "auth_authorizer" {
 data "aws_db_instance" "main" {
   db_instance_identifier = "${local.project_name}-postgres-db"
 }
-
-# Security Group do RDS, criado no repositorio techchallenge-ofisy-rds-infra.
-# So estamos "lendo" - a regra que libera a lambda de auth para ele fica em
-# rds_access.tf deste modulo (nao mexe no repo do RDS).
-data "aws_security_group" "rds" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.main.id]
-  }
-}
