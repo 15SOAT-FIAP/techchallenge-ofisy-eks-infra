@@ -1,3 +1,6 @@
 nlb_listener_arn             = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/net/a1b2c3d4e5f6/1234567890abcdef/1234567890abcdef"
 auth_lambda_name             = "ofisy-auth"
 auth_authorizer_lambda_name  = "ofisy-auth-authorizer"
+datadog_api_key              = "SUA_DATADOG_API_KEY"
+datadog_app_key              = "SUA_DATADOG_APP_KEY"
+datadog_site                 = "us5.datadoghq.com"

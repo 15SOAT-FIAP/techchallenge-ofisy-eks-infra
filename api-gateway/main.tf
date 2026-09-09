@@ -6,11 +6,21 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    datadog = {
+      source  = "DataDog/datadog"
+      version = "~> 3.55"
+    }
   }
 }
 
 provider "aws" {
   region = var.aws_region
+}
+
+provider "datadog" {
+  api_key = var.datadog_api_key
+  app_key = var.datadog_app_key
+  api_url = "https://api.${var.datadog_site}/"
 }
 
 locals {
@@ -124,13 +134,13 @@ resource "aws_apigatewayv2_integration" "nlb_proxy" {
 ########################################
 
 resource "aws_apigatewayv2_authorizer" "customers_token" {
-  api_id                             = aws_apigatewayv2_api.ofisy_gateway.id
-  authorizer_type                    = "REQUEST"
-  authorizer_uri                     = data.aws_lambda_function.authorizer.invoke_arn
-  identity_sources                   = ["$request.header.Authorization"]
-  name                               = "${local.project_name}-customers-authorizer"
-  authorizer_payload_format_version  = "2.0"
-  enable_simple_responses            = true
+  api_id                            = aws_apigatewayv2_api.ofisy_gateway.id
+  authorizer_type                   = "REQUEST"
+  authorizer_uri                    = data.aws_lambda_function.authorizer.invoke_arn
+  identity_sources                  = ["$request.header.Authorization"]
+  name                              = "${local.project_name}-customers-authorizer"
+  authorizer_payload_format_version = "2.0"
+  enable_simple_responses           = true
 }
 
 ########################################
