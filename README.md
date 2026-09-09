@@ -111,7 +111,7 @@ O `infra/` também provisiona o **Datadog Agent** no cluster EKS via Helm (`helm
 
 O Agent roda como DaemonSet (um pod por node) mais o Cluster Agent, coletando métricas de CPU e memória de nodes e pods via kubelet/kube-state-metrics. Logs (JSON estruturado, com correlação de requisições) e APM (via Unix Domain Socket) ficam habilitados; o Process Agent continua desativado para manter o footprint baixo nos nodes `t3.medium`. A correlação entre logs e traces e o envio de spans de latência das APIs dependem da instrumentação da aplicação (`dd-trace-java`) no repositório `techchallenge-ofisy`.
 
-Alertas (`datadog_monitor`) e healthcheck/uptime (Synthetics) não são gerenciados por Terraform neste repositório, são criados manualmente na UI do Datadog.
+Alertas (`datadog_monitor`) não são gerenciados por Terraform neste repositório, são criados manualmente na UI do Datadog. Healthcheck/uptime é a única exceção - ver seção abaixo.
 
 Variáveis relevantes (`infra/variables.tf`):
 
@@ -121,6 +121,14 @@ Variáveis relevantes (`infra/variables.tf`):
 | `datadog_site`    | Site do Datadog (padrão: `us5.datadoghq.com`)                           |
 
 Para execução local, preencha essas variáveis no `terraform.tfvars` (veja `terraform.tfvars.example`).
+
+### Uptime (Synthetics)
+
+Diferente do Agent (que só enxerga o que está dentro do cluster), o uptime público é monitorado de **fora da AWS** via `datadog_synthetics_test`, provisionado em **`api-gateway/`** (não em `infra/`) - essa camada é quem já tem, nativamente, a URL pública (`aws_apigatewayv2_stage.default.invoke_url`), sem precisar passar variável manual entre states.
+
+O teste bate a cada 5 minutos em `<invoke_url>/actuator/health` (rota `ANY /{proxy+}`, sem autenticação) e valida status HTTP 200, cobrindo a cadeia inteira: API Gateway → VPC Link → NLB → Service (k8s) → Pod → Actuator.
+
+Variáveis relevantes (`api-gateway/variables.tf`): `datadog_api_key`, `datadog_app_key` (Application Key, diferente da API Key - necessária pro provider gerenciar recursos via API) e `datadog_site`.
 
 ---
 
@@ -176,8 +184,9 @@ Os secrets são definidos como **Organization Secrets** na org `15SOAT-FIAP`, de
 | `DB_PASSWORD` | Senha do PostgreSQL. Definida pelo repositório do RDS e consumida pela Lambda de emissão de token e pela aplicação |
 | `JWT_SECRET` | Segredo de assinatura do JWT. Precisa ser idêntico entre a Lambda que assina (emissão de token) e a Lambda que valida (authorizer) - o app Spring Boot não participa mais dessa validação |
 | `DD_API_KEY`            | API Key do Datadog, usada pelo Datadog Agent instalado no cluster EKS para enviar métricas          |
+| `DD_APP_KEY`            | Application Key do Datadog, usada pelo provider Terraform em `api-gateway/` para gerenciar o Synthetics Test de uptime |
 
-O `api-gateway/` não usa nenhum secret adicional: os valores que variam (`nlb_listener_arn`, `auth_lambda_name`, `auth_authorizer_lambda_name`) são informados como input do `workflow_dispatch`, não como secret.
+O `api-gateway/` não usa secret adicional além de `DD_API_KEY`/`DD_APP_KEY`: os demais valores que variam (`nlb_listener_arn`, `auth_lambda_name`, `auth_authorizer_lambda_name`) são informados como input do `workflow_dispatch`, não como secret.
 
 ---
 
