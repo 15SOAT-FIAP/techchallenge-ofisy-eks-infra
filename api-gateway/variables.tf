@@ -33,3 +33,21 @@ variable "auth_authorizer_lambda_name" {
   type        = string
   default     = "ofisy-auth-authorizer"
 }
+
+variable "datadog_api_key" {
+  description = "API Key do Datadog (sensivel). Mesma key usada pelo Agent em infra/"
+  type        = string
+  sensitive   = true
+}
+
+variable "datadog_app_key" {
+  description = "Application Key do Datadog (sensivel), usada pelo provider Terraform para gerenciar o Synthetics Test via API"
+  type        = string
+  sensitive   = true
+}
+
+variable "datadog_site" {
+  description = "Site do Datadog (ex.: datadoghq.com, us5.datadoghq.com)"
+  type        = string
+  default     = "us5.datadoghq.com"
+}

@@ -66,6 +66,9 @@ jobs:
           echo 'nlb_listener_arn             = "${{ inputs.nlb_listener_arn }}"' > terraform.tfvars
           echo 'auth_lambda_name             = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
           echo 'auth_authorizer_lambda_name  = "${{ inputs.auth_authorizer_lambda_name }}"' >> terraform.tfvars
+          echo 'datadog_api_key              = "${{ secrets.DD_API_KEY }}"' >> terraform.tfvars
+          echo 'datadog_app_key              = "${{ secrets.DD_APP_KEY }}"' >> terraform.tfvars
+          echo 'datadog_site                 = "us5.datadoghq.com"' >> terraform.tfvars
 
           echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
           echo 'key    = "api-gateway/terraform.tfstate"' >> backend.hcl
