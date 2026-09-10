@@ -12,7 +12,7 @@ resource "datadog_synthetics_test" "api_uptime" {
 
   request_definition {
     method  = "GET"
-    url     = "${aws_apigatewayv2_stage.default.invoke_url}/actuator/health"
+    url     = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/actuator/health"
     timeout = 30
   }
 
