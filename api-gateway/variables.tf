@@ -4,18 +4,26 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "nlb_listener_arn" {
+variable "nlb_service_name" {
   description = <<-EOT
-    ARN do Listener (porta 8080) do NLB interno criado pelo Service (type:
-    LoadBalancer) do Kubernetes. Como o NLB e criado pelo Kubernetes, e nao
-    pelo Terraform, esse ARN precisa ser obtido manualmente apos o deploy
-    do app:
+    Identificacao do Service do Kubernetes (no formato "namespace/nome") que
+    cria o NLB interno da aplicacao, definido em k8s/service.yml do
+    repositorio techchallenge-ofisy.
 
-      NLB_DNS=$(kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-      NLB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$NLB_DNS'].LoadBalancerArn" --output text)
-      aws elbv2 describe-listeners --load-balancer-arn $NLB_ARN --query "Listeners[?Port==\`8080\`].ListenerArn" --output text
+    O NLB e criado pelo Kubernetes, e nao pelo Terraform, entao o Listener
+    :8080 usado pelo VPC Link e descoberto via data source pela tag
+    "kubernetes.io/service-name" que o cloud provider grava no Load Balancer.
+    Por isso o deploy da aplicacao precisa acontecer antes do apply deste
+    module.
   EOT
   type        = string
+  default     = "default/ofisy-service"
+}
+
+variable "nlb_listener_port" {
+  description = "Porta do Listener do NLB interno para onde o API Gateway faz proxy (mesma porta declarada no Service do Kubernetes)"
+  type        = number
+  default     = 8080
 }
 
 variable "auth_lambda_name" {
