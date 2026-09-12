@@ -3,10 +3,6 @@ name: Deploy API Gateway (Terraform)
 on:
   workflow_dispatch:
     inputs:
-      nlb_listener_arn:
-        description: "ARN do Listener :8080 do NLB interno (ver comentário em variables.tf para o comando de obtenção)"
-        required: true
-        type: string
       auth_lambda_name:
         description: "Nome da Lambda de emissão de token via CPF/CNPJ"
         required: true
@@ -23,7 +19,7 @@ jobs:
     name: Provisionar API Gateway (Terraform)
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
-    
+
     concurrency:
       group: deploy-apigw
       cancel-in-progress: false
@@ -63,8 +59,7 @@ jobs:
         run: |
           cd api-gateway
 
-          echo 'nlb_listener_arn             = "${{ inputs.nlb_listener_arn }}"' > terraform.tfvars
-          echo 'auth_lambda_name             = "${{ inputs.auth_lambda_name }}"' >> terraform.tfvars
+          echo 'auth_lambda_name             = "${{ inputs.auth_lambda_name }}"' > terraform.tfvars
           echo 'auth_authorizer_lambda_name  = "${{ inputs.auth_authorizer_lambda_name }}"' >> terraform.tfvars
           echo 'datadog_api_key              = "${{ secrets.DD_API_KEY }}"' >> terraform.tfvars
           echo 'datadog_app_key              = "${{ secrets.DD_APP_KEY }}"' >> terraform.tfvars

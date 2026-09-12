@@ -94,6 +94,21 @@ resource "aws_apigatewayv2_vpc_link" "ofisy" {
   subnet_ids         = data.aws_subnets.private.ids
 }
 
+########################################
+# NLB INTERNO
+########################################
+
+data "aws_lb" "ofisy" {
+  tags = {
+    "kubernetes.io/service-name" = var.nlb_service_name
+  }
+}
+
+data "aws_lb_listener" "ofisy" {
+  load_balancer_arn = data.aws_lb.ofisy.arn
+  port              = var.nlb_listener_port
+}
+
 data "aws_lambda_function" "auth" {
   function_name = var.auth_lambda_name
 }
@@ -125,7 +140,7 @@ resource "aws_apigatewayv2_integration" "nlb_proxy" {
   integration_method     = "ANY"
   connection_type        = "VPC_LINK"
   connection_id          = aws_apigatewayv2_vpc_link.ofisy.id
-  integration_uri        = var.nlb_listener_arn
+  integration_uri        = data.aws_lb_listener.ofisy.arn
   payload_format_version = "1.0"
 }
 

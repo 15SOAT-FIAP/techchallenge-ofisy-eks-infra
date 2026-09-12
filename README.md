@@ -99,7 +99,7 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | Instância RDS | identifier `ofisy-postgres-db` | rds-infra | `infra-auth/` |
 | Função Lambda (emissão de token) | `ofisy-auth` | `infra-auth/` | `api-gateway/` |
 | Função Lambda (authorizer) | `ofisy-auth-authorizer` | `infra-auth/` | `api-gateway/` |
-| NLB da aplicação (interno) | ARN do Listener, informado manualmente (var `nlb_listener_arn`) | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
+| NLB da aplicação (interno) | tag `kubernetes.io/service-name` = `default/ofisy-service` | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
 
 O Security Group da Lambda é criado em `infra/`, e não junto da função, justamente para que o rds-infra consiga liberar a porta 5432 a partir dele sem depender do state da Lambda.
 
@@ -155,13 +155,22 @@ O NLB do EKS é **interno** (sem IP público) - o único ponto de entrada públi
 
 Uma NLB opera na camada 4 (TCP puro) - não entende path de URL. Por isso a integração via VPC Link (`connection_type = "VPC_LINK"`) aponta pro **ARN do Listener** da NLB, não pra uma URL com path embutido. Consequência direta: existe **uma única integração** (`nlb_proxy`) compartilhada por todas as rotas que vão pro app - o path original da requisição passa direto, e quem continua diferenciando cada rota é só a presença (ou não) de `authorization_type`/`authorizer_id`.
 
-Como o NLB é criado pelo Kubernetes (não pelo Terraform), o ARN do Listener não é descobrível via `data source` - precisa ser obtido manualmente a cada vez que o `Service` é recriado:
+O NLB é criado pelo Kubernetes (não pelo Terraform), a partir do `Service` `type: LoadBalancer` definido em `k8s/service.yml` do repositório `techchallenge-ofisy`. Mesmo assim o ARN do Listener **não precisa ser informado manualmente**: o cloud provider grava no Load Balancer a tag `kubernetes.io/service-name` com o valor `namespace/nome` do Service, e o module descobre o Listener a partir dela:
 
-```bash
-NLB_DNS=$(kubectl get svc ofisy-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-NLB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$NLB_DNS'].LoadBalancerArn" --output text)
-aws elbv2 describe-listeners --load-balancer-arn $NLB_ARN --query "Listeners[?Port==\`8080\`].ListenerArn" --output text
+```hcl
+data "aws_lb" "ofisy" {
+  tags = {
+    "kubernetes.io/service-name" = var.nlb_service_name # default: default/ofisy-service
+  }
+}
+
+data "aws_lb_listener" "ofisy" {
+  load_balancer_arn = data.aws_lb.ofisy.arn
+  port              = var.nlb_listener_port # default: 8080
+}
 ```
+
+O trade-off é de ordenação: o `plan` do `api-gateway/` passa a falhar (em vez de só o `apply`) se a aplicação ainda não tiver sido deployada no cluster, porque sem o `Service` não existe NLB a descobrir. Como o deploy do app é uma etapa anterior no fluxo, isso troca um input manual recorrente por uma falha explícita e mais cedo.
 
 **Pendência conhecida**: o header `X-Customer-Id` (usado para filtrar notificações de OS por cliente) não é mais injetado pela integração - decisão de escopo, não esquecimento. Enquanto isso não for retomado, as 4 rotas de `/api/v1/notifications/service-orders/*` respondem `400` (o controller do app exige esse header).
 
@@ -186,7 +195,7 @@ Os secrets são definidos como **Organization Secrets** na org `15SOAT-FIAP`, de
 | `DD_API_KEY`            | API Key do Datadog, usada pelo Datadog Agent instalado no cluster EKS para enviar métricas          |
 | `DD_APP_KEY`            | Application Key do Datadog, usada pelo provider Terraform em `api-gateway/` para gerenciar o Synthetics Test de uptime |
 
-O `api-gateway/` não usa secret adicional além de `DD_API_KEY`/`DD_APP_KEY`: os demais valores que variam (`nlb_listener_arn`, `auth_lambda_name`, `auth_authorizer_lambda_name`) são informados como input do `workflow_dispatch`, não como secret.
+O `api-gateway/` não usa secret adicional além de `DD_API_KEY`/`DD_APP_KEY`: os demais valores que variam (`auth_lambda_name`, `auth_authorizer_lambda_name`) são informados como input do `workflow_dispatch`, não como secret. O Listener do NLB é descoberto via `data source`, então não é input nem secret.
 
 ---
 
@@ -197,8 +206,7 @@ O `api-gateway/` não usa secret adicional além de `DD_API_KEY`/`DD_APP_KEY`: o
 1. Vá até a aba **Actions** do repositório no GitHub.
 2. Selecione a pipeline **`Deploy EKS Infrastructure (Terraform)`** e clique em **Run workflow**, escolhendo a branch desejada. Esta é a **etapa 1** do fluxo.
 3. Depois que o RDS e as imagens das Lambdas estiverem prontos (etapas 2 e 3), selecione **`Deploy Lambda de Autenticação (Terraform)`** e clique em **Run workflow**, informando em `image_tag` e `authorizer_image_tag` os SHAs dos commits publicados no ECR pelo CD do repositório de autenticação. Esta é a **etapa 4**.
-4. Depois que a aplicação (`techchallenge-ofisy`) já tiver sido deployada no cluster (etapa 5, cria o NLB interno), obtenha o ARN do Listener (comandos na seção "NLB interno + VPC Link", acima) e selecione **`Deploy API Gateway (Terraform)`**, informando:
-   - `nlb_listener_arn`: ARN do Listener :8080 do NLB
+4. Depois que a aplicação (`techchallenge-ofisy`) já tiver sido deployada no cluster (etapa 5, cria o NLB interno), selecione **`Deploy API Gateway (Terraform)`**, informando:
    - `auth_lambda_name`: nome da função de emissão de token (padrão `ofisy-auth`)
    - `auth_authorizer_lambda_name`: nome da função authorizer (padrão `ofisy-auth-authorizer`)
 
@@ -270,10 +278,10 @@ cd api-gateway
 cp terraform.tfvars.example terraform.tfvars
 cp backend.hcl.example backend.hcl
 
-# Preencha nlb_listener_arn, auth_lambda_name e auth_authorizer_lambda_name
-# no terraform.tfvars (comandos pra obter o ARN na seção "NLB interno +
-# VPC Link", acima), e o bucket no backend.hcl (a key deve ser
-# api-gateway/terraform.tfstate)
+# Preencha auth_lambda_name e auth_authorizer_lambda_name no
+# terraform.tfvars, e o bucket no backend.hcl (a key deve ser
+# api-gateway/terraform.tfstate). O Listener do NLB é descoberto
+# automaticamente via data source.
 
 terraform init -backend-config=backend.hcl
 terraform plan
