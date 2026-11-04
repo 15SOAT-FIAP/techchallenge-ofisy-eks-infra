@@ -45,7 +45,7 @@ data "aws_ecr_repository" "auth_authorizer" {
   name = "${local.project_name}-auth-authorizer"
 }
 
-# Instância RDS provisionada pelo repositório techchallenge-ofisy-rds-infra
+# Instância RDS do core provisionada pelo repositório techchallenge-ofisy-db-infra
 data "aws_db_instance" "main" {
-  db_instance_identifier = "${local.project_name}-postgres-db"
+  db_instance_identifier = "ms-${local.project_name}-core-db"
 }
