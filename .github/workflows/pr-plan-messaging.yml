@@ -1,0 +1,76 @@
+name: Terraform Plan Mensageria SNS/SQS (PR)
+
+on:
+  pull_request:
+    paths:
+      - 'messaging/**'
+      - '.github/workflows/pr-plan-messaging.yml'
+
+jobs:
+  terraform-plan-messaging:
+    name: Terraform Plan (Mensageria SNS/SQS)
+    runs-on: ubuntu-latest
+    environment: AWS_ACADEMY
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Configurar Backend
+        run: |
+          cd messaging
+          echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
+          echo 'key    = "messaging/terraform.tfstate"' >> backend.hcl
+          echo 'region = "us-east-1"' >> backend.hcl
+
+      - name: Terraform Init
+        run: |
+          cd messaging
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Plan
+        run: |
+          cd messaging
+          terraform plan -no-color > plan.txt
+
+          echo "### Planejamento da Mensageria (PR)" >> $GITHUB_STEP_SUMMARY
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          cat plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Comentar PR com Plan
+        uses: actions/github-script@v9
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('messaging/plan.txt', 'utf8');
+            const maxLen = 65000;
+            const safePlan = plan.length > maxLen ? plan.substring(0, maxLen) + '\n...[TRUNCATED]' : plan;
+
+            const output = `#### Terraform Plan - Mensageria SNS/SQS\n\n<details><summary>Mostrar detalhes do plano de execução</summary>\n\n\`\`\`terraform\n${safePlan}\n\`\`\`\n\n</details>\n\n*Ação rodada pelo commit ${context.sha}*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
