@@ -2,22 +2,13 @@
 # DATADOG AGENT (Kubernetes resource monitoring)
 ########################################
 
-resource "kubernetes_namespace" "datadog" {
-  metadata {
-    name = "datadog"
-  }
-
-  depends_on = [
-    aws_eks_node_group.main
-  ]
-}
-
 resource "helm_release" "datadog" {
-  name       = "datadog"
-  repository = "https://helm.datadoghq.com"
-  chart      = "datadog"
-  version    = "3.239.0"
-  namespace  = kubernetes_namespace.datadog.metadata[0].name
+  name             = "datadog"
+  repository       = "https://helm.datadoghq.com"
+  chart            = "datadog"
+  version          = "3.239.0"
+  namespace        = "datadog"
+  create_namespace = true
 
   values = [
     yamlencode({
@@ -67,6 +58,6 @@ resource "helm_release" "datadog" {
   ]
 
   depends_on = [
-    kubernetes_namespace.datadog
+    aws_eks_node_group.main
   ]
 }

@@ -95,17 +95,21 @@ resource "aws_apigatewayv2_vpc_link" "ofisy" {
 }
 
 ########################################
-# NLB INTERNO
+# NLB INTERNO - um por microsservico
 ########################################
 
-data "aws_lb" "ofisy" {
+data "aws_lb" "service" {
+  for_each = var.nlb_service_names
+
   tags = {
-    "kubernetes.io/service-name" = var.nlb_service_name
+    "kubernetes.io/service-name" = each.value
   }
 }
 
-data "aws_lb_listener" "ofisy" {
-  load_balancer_arn = data.aws_lb.ofisy.arn
+data "aws_lb_listener" "service" {
+  for_each = var.nlb_service_names
+
+  load_balancer_arn = data.aws_lb.service[each.key].arn
   port              = var.nlb_listener_port
 }
 
@@ -135,12 +139,14 @@ resource "aws_apigatewayv2_integration" "auth_integration" {
 }
 
 resource "aws_apigatewayv2_integration" "nlb_proxy" {
+  for_each = var.nlb_service_names
+
   api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
   integration_type       = "HTTP_PROXY"
   integration_method     = "ANY"
   connection_type        = "VPC_LINK"
   connection_id          = aws_apigatewayv2_vpc_link.ofisy.id
-  integration_uri        = data.aws_lb_listener.ofisy.arn
+  integration_uri        = data.aws_lb_listener.service[each.key].arn
   payload_format_version = "1.0"
 }
 
@@ -188,66 +194,31 @@ resource "aws_apigatewayv2_route" "auth_customers" {
   target    = "integrations/${aws_apigatewayv2_integration.auth_integration.id}"
 }
 
-resource "aws_apigatewayv2_route" "service_order_status" {
-  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key          = "GET /api/v1/service-orders/{id}/status"
-  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
-  authorization_type = "CUSTOM"
-  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
+# Rota -> microsservico que atende, e se exige o token do cliente.
+# O que nao casar com nenhuma rota cai no ANY /{proxy+}, que vai pro core.
+# Enquanto um servico nao for extraido do core (com Service/NLB proprio e
+# entrada em var.nlb_service_names), as rotas dele continuam aqui no core.
+locals {
+  service_routes = {
+    "ANY /{proxy+}"                                        = { service = "core", protected = false }
+    "GET /api/v1/service-orders/{id}/status"               = { service = "core", protected = true }
+    "PATCH /api/v1/service-orders/quote/{id}/approve"      = { service = "core", protected = true }
+    "PATCH /api/v1/service-orders/quote/{id}/reprove"      = { service = "core", protected = true }
+    "GET /api/v1/notifications/service-orders"             = { service = "core", protected = true }
+    "GET /api/v1/notifications/service-orders/unread"      = { service = "core", protected = true }
+    "GET /api/v1/notifications/service-orders/{id}"        = { service = "core", protected = true }
+    "PATCH /api/v1/notifications/service-orders/{id}/read" = { service = "core", protected = true }
+  }
 }
 
-resource "aws_apigatewayv2_route" "quote_approve" {
-  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key          = "PATCH /api/v1/service-orders/quote/{id}/approve"
-  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
-  authorization_type = "CUSTOM"
-  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
-}
+resource "aws_apigatewayv2_route" "service" {
+  for_each = local.service_routes
 
-resource "aws_apigatewayv2_route" "quote_reprove" {
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key          = "PATCH /api/v1/service-orders/quote/{id}/reprove"
-  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
-  authorization_type = "CUSTOM"
-  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
-}
-
-resource "aws_apigatewayv2_route" "notifications_service_orders" {
-  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key          = "GET /api/v1/notifications/service-orders"
-  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
-  authorization_type = "CUSTOM"
-  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
-}
-
-resource "aws_apigatewayv2_route" "notifications_service_orders_unread" {
-  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key          = "GET /api/v1/notifications/service-orders/unread"
-  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
-  authorization_type = "CUSTOM"
-  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
-}
-
-resource "aws_apigatewayv2_route" "notifications_service_order_by_id" {
-  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key          = "GET /api/v1/notifications/service-orders/{id}"
-  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
-  authorization_type = "CUSTOM"
-  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
-}
-
-resource "aws_apigatewayv2_route" "notifications_service_order_mark_read" {
-  api_id             = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key          = "PATCH /api/v1/notifications/service-orders/{id}/read"
-  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
-  authorization_type = "CUSTOM"
-  authorizer_id      = aws_apigatewayv2_authorizer.customers_token.id
-}
-
-resource "aws_apigatewayv2_route" "default_proxy" {
-  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
-  route_key = "ANY /{proxy+}"
-  target    = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
+  route_key          = each.key
+  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy[each.value.service].id}"
+  authorization_type = each.value.protected ? "CUSTOM" : "NONE"
+  authorizer_id      = each.value.protected ? aws_apigatewayv2_authorizer.customers_token.id : null
 }
 
 resource "aws_apigatewayv2_stage" "default" {

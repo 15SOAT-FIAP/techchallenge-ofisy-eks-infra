@@ -4,20 +4,24 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "nlb_service_name" {
+variable "nlb_service_names" {
   description = <<-EOT
-    Identificacao do Service do Kubernetes (no formato "namespace/nome") que
-    cria o NLB interno da aplicacao, definido em k8s/service.yml do
-    repositorio techchallenge-ofisy.
+    Service do Kubernetes (no formato "namespace/nome") que cria o NLB interno
+    de cada microsservico, definido no k8s/service.yml do repositorio de cada
+    um.
 
-    O NLB e criado pelo Kubernetes, e nao pelo Terraform, entao o Listener
-    :8080 usado pelo VPC Link e descoberto via data source pela tag
+    Os NLBs sao criados pelo Kubernetes, e nao pelo Terraform, entao o
+    Listener usado pelo VPC Link e descoberto via data source pela tag
     "kubernetes.io/service-name" que o cloud provider grava no Load Balancer.
-    Por isso o deploy da aplicacao precisa acontecer antes do apply deste
-    module.
+    Por isso o deploy de cada microsservico listado aqui precisa acontecer
+    antes do apply deste module. So entram no map os servicos que ja tem
+    Service deployado: os demais (ex.: "default/ms-ofisy-stock-service")
+    sao adicionados quando forem extraidos do core.
   EOT
-  type        = string
-  default     = "default/ofisy-service"
+  type        = map(string)
+  default = {
+    core = "default/ofisy-service"
+  }
 }
 
 variable "nlb_listener_port" {

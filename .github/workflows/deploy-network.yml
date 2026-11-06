@@ -1,0 +1,64 @@
+name: Deploy Rede (Terraform)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  terraform-network:
+    name: Provisionar Rede, Security Groups e ECRs das Lambdas (Terraform)
+    runs-on: ubuntu-latest
+    environment: AWS_ACADEMY
+
+    concurrency:
+      group: deploy-network
+      cancel-in-progress: false
+
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Configurar Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Garantir Bucket S3 do Terraform State
+        run: |
+          aws s3api head-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" 2>/dev/null || \
+          aws s3api create-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" --region us-east-1 || echo "Bucket já existente ou criado."
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=eks/terraform.tfstate" \
+            -backend-config="region=us-east-1"
+
+      - name: Terraform Plan
+        run: |
+          terraform plan -no-color > plan.txt
+          cat plan.txt
+          echo "### Planejamento da Rede" >> $GITHUB_STEP_SUMMARY
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          cat plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Apply
+        run: |
+          terraform apply -auto-approve
+
+          VPC_ID=$(terraform output -raw vpc_id)
+          echo "### Rede Provisionada com Sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "- VPC: $VPC_ID" >> $GITHUB_STEP_SUMMARY

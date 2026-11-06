@@ -1,17 +1,37 @@
-name: Deploy EKS Infrastructure (Terraform)
+name: Deploy Clusters EKS (Terraform)
 
 on:
   workflow_dispatch:
+    inputs:
+      service:
+        description: 'Cluster a provisionar'
+        required: true
+        default: all
+        type: choice
+        options: [all, core, billing, stock, execution, notification]
 
 jobs:
   terraform-eks:
-    name: Provisionar Cluster EKS & Rede (Terraform)
+    name: Provisionar cluster ${{ matrix.service }}
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
-    
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(inputs.service == 'all' && '["core","billing","stock","execution","notification"]' || format('["{0}"]', inputs.service)) }}
+
     concurrency:
-      group: deploy-eks
+      group: eks-${{ matrix.service }}
       cancel-in-progress: false
+
+    defaults:
+      run:
+        working-directory: eks/${{ matrix.service }}
+
+    env:
+      TF_VAR_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+      TF_VAR_datadog_api_key: ${{ secrets.DD_API_KEY }}
 
     steps:
       - name: Checkout do código
@@ -30,52 +50,35 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Garantir Bucket S3 do Terraform State
+      - name: Descobrir Roles do EKS
         run: |
-          aws s3api head-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" 2>/dev/null || \
-          aws s3api create-bucket --bucket "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" --region us-east-1 || echo "Bucket já existente ou criado."
-
-      - name: Configurar Arquivos de Variáveis
-        run: |
-          cd infra
           EKS_CLUSTER_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksClusterRole')].RoleName" --output text)
           EKS_NODE_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksNodeRole')].RoleName" --output text)
-          if [ -z "$EKS_CLUSTER_ROLE" ]; then EKS_CLUSTER_ROLE="LabRole"; fi
-          if [ -z "$EKS_NODE_ROLE" ]; then EKS_NODE_ROLE="LabRole"; fi
-
-          echo 'account_id = "${{ secrets.AWS_ACCOUNT_ID }}"' > terraform.tfvars
-          echo 'role_name  = "LabRole"' >> terraform.tfvars
-          echo "eks_cluster_role = \"$EKS_CLUSTER_ROLE\"" >> terraform.tfvars
-          echo "eks_node_role = \"$EKS_NODE_ROLE\"" >> terraform.tfvars
-          echo 'datadog_api_key = "${{ secrets.DD_API_KEY }}"' >> terraform.tfvars
-          echo 'datadog_site    = "us5.datadoghq.com"' >> terraform.tfvars
-
-          echo 'bucket = "ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}"' > backend.hcl
-          echo 'key    = "eks/terraform.tfstate"' >> backend.hcl
-          echo 'region = "us-east-1"' >> backend.hcl
+          echo "TF_VAR_eks_cluster_role=${EKS_CLUSTER_ROLE:-LabRole}" >> $GITHUB_ENV
+          echo "TF_VAR_eks_node_role=${EKS_NODE_ROLE:-LabRole}" >> $GITHUB_ENV
 
       - name: Terraform Init
         run: |
-          cd infra
-          terraform init -backend-config=backend.hcl
+          terraform init \
+            -backend-config="bucket=ofisy-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=eks/${{ matrix.service }}/terraform.tfstate" \
+            -backend-config="region=us-east-1"
 
       - name: Terraform Plan
         run: |
-          cd infra
           terraform plan -no-color > plan.txt
           cat plan.txt
-          echo "### Planejamento de Infraestrutura do EKS & Redes" >> $GITHUB_STEP_SUMMARY
+          echo "### Planejamento do cluster ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
           echo '```terraform' >> $GITHUB_STEP_SUMMARY
           cat plan.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Terraform Apply
         run: |
-          cd infra
           terraform apply -auto-approve
 
           EKS_NAME=$(terraform output -raw eks_cluster_name)
           ECR_URL=$(terraform output -raw ecr_repository_url)
-          echo "### EKS & Redes Provisionados com Sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "### Cluster ${{ matrix.service }} Provisionado com Sucesso" >> $GITHUB_STEP_SUMMARY
           echo "- Cluster EKS: $EKS_NAME" >> $GITHUB_STEP_SUMMARY
           echo "- Repositório ECR: $ECR_URL" >> $GITHUB_STEP_SUMMARY
