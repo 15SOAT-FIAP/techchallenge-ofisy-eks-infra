@@ -10,6 +10,7 @@ O repositório contém camadas independentes, cada uma com seu próprio state do
 | `eks/<service>/` | `eks/<service>/terraform.tfstate` | Cluster EKS, node group, ECR e Datadog Agent de um microsserviço (`core`, `billing`, `stock`, `execution`, `notification`) |
 | `infra-auth/` | `auth/terraform.tfstate` | Lambdas de autenticação de clientes (emissão de token e authorizer) |
 | `api-gateway/` | `api-gateway/terraform.tfstate` | API Gateway público, integrado às Lambdas e ao NLB de cada microsserviço |
+| `messaging/` | `messaging/terraform.tfstate` | Tópicos SNS e filas SQS FIFO usados na comunicação entre os microsserviços |
 
 As cinco raízes `eks/<service>/` usam o mesmo módulo, `modules/eks/`, e só mudam o nome do serviço. Cada cluster tem seu próprio ciclo de vida: sobe e é destruído sem afetar os outros. É o mesmo padrão dos bancos no [techchallenge-ofisy-db-infra](https://github.com/15SOAT-FIAP/techchallenge-ofisy-db-infra).
 
@@ -35,6 +36,7 @@ Isolar e automatizar o provisionamento da infraestrutura de computação em nuve
 - **AWS API Gateway (HTTP API)**: Porta de entrada pública da aplicação - expõe `POST /auth/customers` e repassa as demais rotas para o cluster de cada microsserviço via VPC Link.
 - **AWS VPC Link**: permite o API Gateway (que roda fora da VPC) alcançar os NLBs internos na subnet privada. Sem ele, o Gateway não teria como chegar num NLB sem IP público.
 - **AWS Lambda Authorizer**: valida o token JWT (HS256) nas rotas protegidas do Gateway (status, notificações de OS e aprovação/reprovação de orçamento). Necessário porque o JWT Authorizer nativo do API Gateway só verifica assinatura assimétrica via JWKS, e este token usa segredo simétrico.
+- **AWS SNS & SQS (FIFO)**: Mensageria entre os microsserviços. Os serviços publicadores têm um tópico próprio, e cada serviço consome de uma fila com DLQ, recebendo só os eventos que lhe interessam.
 - **AWS IAM**: Gerenciamento de papéis de execução para cluster, worker nodes e Lambdas (compatível com AWS Academy / `LabRole`).
 - **GitHub Actions**: Pipeline automatizada de CI/CD para deploy e destruição da infraestrutura.
 
@@ -69,11 +71,13 @@ flowchart TD
     P5["5. eks-infra - infra-auth/<br/>Lambdas de autenticacao (emissao + authorizer)"]
     P6["6. techchallenge-ofisy e ms-ofisy-*<br/>Microsservicos nos clusters (criam os NLBs)"]
     P7["7. eks-infra - api-gateway/<br/>API Gateway publico"]
+    PM["eks-infra - messaging/<br/>Topicos SNS e filas SQS"]
 
     P1 --> P2 --> P6
     P1 --> P4 --> P5 --> P6 --> P7
     P1 --> P3 --> P5
     P4 --> P6
+    PM --> P6
 ```
 
 Cada etapa só pode rodar depois que as anteriores terminaram. A tabela abaixo detalha o que precisa existir em cada uma:
@@ -90,7 +94,9 @@ Cada etapa só pode rodar depois que as anteriores terminaram. A tabela abaixo d
 
 As etapas **2, 3 e 4 não dependem umas das outras** e podem rodar em paralelo depois da etapa 1. Dentro das etapas 2, 4 e 6, cada microsserviço é independente dos outros.
 
-Para **destruir**, percorra o caminho inverso: API Gateway → microsserviços → Lambdas → bancos → clusters → rede. Destruir a rede antes das Lambdas deixa recursos órfãos, porque as ENIs da Lambda de emissão de token ficam presas às subnets. Destrua o Gateway antes das Lambdas para evitar rotas apontando pra funções que não existem mais.
+A **mensageria** (`messaging/`) não depende de nenhuma outra camada, nem da rede, e pode rodar a qualquer momento. Ela só precisa existir antes da etapa 6, porque os microsserviços não sobem sem a fila que consomem.
+
+Para **destruir**, percorra o caminho inverso: API Gateway → microsserviços → mensageria → Lambdas → bancos → clusters → rede. Destruir a rede antes das Lambdas deixa recursos órfãos, porque as ENIs da Lambda de emissão de token ficam presas às subnets. Destrua o Gateway antes das Lambdas para evitar rotas apontando pra funções que não existem mais.
 
 ### Contrato entre os repositórios
 
@@ -112,8 +118,38 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | Função Lambda (authorizer) | `ofisy-auth-authorizer` | `infra-auth/` | `api-gateway/` |
 | NLB do core (interno) | tag `kubernetes.io/service-name` = `default/ofisy-service` | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
 | NLB dos demais serviços (interno, quando forem extraídos do core) | tag `kubernetes.io/service-name` = `default/ms-ofisy-<service>-service` | `ms-ofisy-<service>` (Service do k8s) | `api-gateway/` |
+| Tópico SNS de cada serviço publicador | `ofisy-<service>-events.fifo` | `messaging/` | Cada microsserviço (publica pelo nome) |
+| Fila SQS de cada serviço consumidor | `ofisy-<service>.fifo` | `messaging/` | Cada microsserviço (consome pelo nome) |
 
 O Security Group da Lambda é criado em `infra/`, e não junto da função, justamente para que o db-infra consiga liberar a porta 5432 a partir dele sem depender do state da Lambda.
+
+---
+
+## Mensageria (SNS/SQS)
+
+Os microsserviços conversam por eventos. Os serviços publicadores têm um tópico SNS FIFO próprio, e cada serviço consome de uma única fila SQS FIFO. O tópico e a fila `service-order` são do core. As assinaturas filtram pelo campo `type` do envelope, então cada fila recebe só os eventos de que o seu serviço precisa. Depois de 5 recebimentos sem sucesso, a mensagem vai para a DLQ da fila (`ofisy-<service>-dlq.fifo`).
+
+| Tópico | Fila | Eventos |
+| :--- | :--- | :--- |
+| `ofisy-service-order-events.fifo` | `ofisy-execution.fifo` | `ServiceOrderCancelled` |
+| `ofisy-service-order-events.fifo` | `ofisy-notification.fifo` | `ServiceOrderFinished` |
+| `ofisy-billing-events.fifo` | `ofisy-stock.fifo` | `QuoteCreated`, `QuoteReproved` |
+| `ofisy-billing-events.fifo` | `ofisy-service-order.fifo` | `QuoteSentForApproval`, `QuoteApproved`, `PaymentConfirmed`, `QuoteCancelled` |
+| `ofisy-billing-events.fifo` | `ofisy-notification.fifo` | `QuoteSentForApproval`, `PaymentConfirmed` |
+| `ofisy-billing-events.fifo` | `ofisy-execution.fifo` | `QuoteApproved` |
+| `ofisy-stock-events.fifo` | `ofisy-billing.fifo` | `StockConsumed`, `StockConsumptionFailed` |
+| `ofisy-stock-events.fifo` | `ofisy-notification.fifo` | `StockLow` |
+| `ofisy-stock-events.fifo` | `ofisy-service-order.fifo` | `StockRefunded` |
+| `ofisy-execution-events.fifo` | `ofisy-service-order.fifo` | `ExecutionStarted`, `AllExecutionsCompleted` |
+| `ofisy-execution-events.fifo` | `ofisy-stock.fifo` | `AllExecutionsCancelled` |
+
+O roteamento fica no mapa `subscriptions` de `messaging/main.tf`.
+
+Para a entrega funcionar, todo publicador precisa seguir o mesmo contrato:
+
+- O corpo da mensagem é o envelope `{ eventId, type, serviceOrderId, occurredAt, payload }`, e o filtro das assinaturas lê o `type` dele.
+- Todo publish informa um `MessageGroupId` (o `serviceOrderId`), que garante a ordem dos eventos de uma mesma OS.
+- As assinaturas usam *raw delivery*, então o consumidor recebe o envelope como foi publicado, sem o invólucro do SNS.
 
 ---
 
@@ -240,9 +276,11 @@ O `api-gateway/` não usa secret adicional além de `DD_API_KEY`/`DD_APP_KEY`: o
 
    Esta é a **etapa 7**, a última do fluxo.
 
+A pipeline **`Deploy Mensageria SNS/SQS (Terraform)`** não tem inputs.
+
 A pipeline da Lambda verifica se a imagem existe no ECR antes de rodar o Terraform, e falha com uma mensagem explícita caso a etapa 3 ainda não tenha sido concluída.
 
-Os workflows **`Destruir API Gateway`**, **`Destruir Lambda de Autenticação`**, **`Destruir Clusters EKS`** e **`Destruir Rede`** fazem o caminho inverso: destrua sempre o Gateway primeiro, depois a Lambda, depois os bancos (no db-infra), depois os clusters e por último a rede. O destroy dos clusters também aceita `service`, para derrubar um só. Antes do `terraform destroy`, ele apaga os Services `LoadBalancer` do cluster, porque os NLBs são criados pelo Kubernetes, fora do Terraform. Sem isso, eles ficariam órfãos e travariam o destroy da rede.
+Os workflows **`Destruir API Gateway`**, **`Destruir Lambda de Autenticação`**, **`Destruir Clusters EKS`** e **`Destruir Rede`** fazem o caminho inverso: destrua sempre o Gateway primeiro, depois a Lambda, depois os bancos (no db-infra), depois os clusters e por último a rede. O destroy dos clusters também aceita `service`, para derrubar um só. Antes do `terraform destroy`, ele apaga os Services `LoadBalancer` do cluster, porque os NLBs são criados pelo Kubernetes, fora do Terraform. Sem isso, eles ficariam órfãos e travariam o destroy da rede. O **`Destruir Mensageria SNS/SQS`** é independente e pode rodar depois que os microsserviços saírem do ar.
 
 ---
 
@@ -329,6 +367,24 @@ terraform apply -auto-approve
 
 # URL pública final:
 terraform output api_gateway_invoke_url
+```
+
+#### 6. Mensageria (`messaging/`)
+
+Antes do deploy dos microsserviços:
+
+```bash
+cd messaging
+
+cp backend.hcl.example backend.hcl
+# Preencha o account_id no nome do bucket do backend.hcl
+
+terraform init -backend-config=backend.hcl
+terraform plan
+terraform apply -auto-approve
+
+# ARNs dos tópicos e URLs das filas:
+terraform output
 ```
 
 ---
