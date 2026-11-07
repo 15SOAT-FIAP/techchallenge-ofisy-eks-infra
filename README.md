@@ -282,6 +282,21 @@ A pipeline da Lambda verifica se a imagem existe no ECR antes de rodar o Terrafo
 
 Os workflows **`Destruir API Gateway`**, **`Destruir Lambda de Autenticação`**, **`Destruir Clusters EKS`** e **`Destruir Rede`** fazem o caminho inverso: destrua sempre o Gateway primeiro, depois a Lambda, depois os bancos (no db-infra), depois os clusters e por último a rede. O destroy dos clusters também aceita `service`, para derrubar um só. Antes do `terraform destroy`, ele apaga os Services `LoadBalancer` do cluster, porque os NLBs são criados pelo Kubernetes, fora do Terraform. Sem isso, eles ficariam órfãos e travariam o destroy da rede. O **`Destruir Mensageria SNS/SQS`** é independente e pode rodar depois que os microsserviços saírem do ar.
 
+Todos os destroys terminam com sucesso sem fazer nada quando o state da camada já está vazio, então podem ser executados de novo sem quebrar.
+
+#### Orquestração pelo ofisy-platform
+
+Além do `workflow_dispatch`, os workflows de deploy e destroy aceitam `workflow_call`, e o repositório [ofisy-platform](https://github.com/15SOAT-FIAP/ofisy-platform) os chama em sequência pelo `up.yml` (sobe o ambiente) e pelo `down.yml` (destrói), seguindo a ordem de execução descrita acima. Os secrets chegam por `secrets: inherit`. Os inputs são os mesmos do disparo manual:
+
+| Workflow | Inputs |
+| :--- | :--- |
+| `deploy-eks.yml`, `destroy-eks.yml` | `service` (padrão `all`) |
+| `deploy-auth-lambda.yml` | `image_tag` e `authorizer_image_tag` (obrigatórios) |
+| `deploy-api-gateway.yml`, `destroy-api-gateway.yml` | `auth_lambda_name` (padrão `ofisy-auth`) e `auth_authorizer_lambda_name` (padrão `ofisy-auth-authorizer`) |
+| Demais | Nenhum |
+
+Quando chamado de outro repositório, o checkout usa a branch padrão (`master`) deste repositório.
+
 ---
 
 ### Opção B: Execução Local via CLI
