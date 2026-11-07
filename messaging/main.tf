@@ -37,7 +37,7 @@ locals {
     billing-stock = {
       topic  = "billing"
       queue  = "stock"
-      events = ["QuoteCreated", "QuoteReproved"]
+      events = ["QuoteCreated", "QuoteUpdated", "QuoteReproved"]
     }
     billing-service-order = {
       topic  = "billing"

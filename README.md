@@ -133,7 +133,7 @@ Os microsserviços conversam por eventos. Os serviços publicadores têm um tóp
 | :--- | :--- | :--- |
 | `ofisy-service-order-events.fifo` | `ofisy-execution.fifo` | `ServiceOrderCancelled` |
 | `ofisy-service-order-events.fifo` | `ofisy-notification.fifo` | `ServiceOrderFinished` |
-| `ofisy-billing-events.fifo` | `ofisy-stock.fifo` | `QuoteCreated`, `QuoteReproved` |
+| `ofisy-billing-events.fifo` | `ofisy-stock.fifo` | `QuoteCreated`, `QuoteUpdated`, `QuoteReproved` |
 | `ofisy-billing-events.fifo` | `ofisy-service-order.fifo` | `QuoteSentForApproval`, `QuoteApproved`, `PaymentConfirmed`, `QuoteCancelled` |
 | `ofisy-billing-events.fifo` | `ofisy-notification.fifo` | `QuoteSentForApproval`, `PaymentConfirmed` |
 | `ofisy-billing-events.fifo` | `ofisy-execution.fifo` | `QuoteApproved` |
