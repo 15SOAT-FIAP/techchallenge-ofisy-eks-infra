@@ -44,4 +44,8 @@ jobs:
       - name: Terraform Destroy
         run: |
           cd messaging
+          if [ -z "$(terraform state list)" ]; then
+            echo "State vazio, nada a destruir."
+            exit 0
+          fi
           terraform destroy -auto-approve
