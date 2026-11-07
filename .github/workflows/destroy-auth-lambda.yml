@@ -2,6 +2,7 @@ name: Destruir Lambda de Autenticação (Terraform)
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   destroy-auth-lambda:
@@ -12,6 +13,8 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v7
+        with:
+          repository: 15SOAT-FIAP/techchallenge-ofisy-eks-infra
 
       - name: Configurar Credenciais AWS
         uses: aws-actions/configure-aws-credentials@v6
