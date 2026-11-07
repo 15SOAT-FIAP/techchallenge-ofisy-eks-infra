@@ -286,16 +286,7 @@ Todos os destroys terminam com sucesso sem fazer nada quando o state da camada j
 
 #### Orquestração pelo ofisy-platform
 
-Além do `workflow_dispatch`, os workflows de deploy e destroy aceitam `workflow_call`, e o repositório [ofisy-platform](https://github.com/15SOAT-FIAP/ofisy-platform) os chama em sequência pelo `up.yml` (sobe o ambiente) e pelo `down.yml` (destrói), seguindo a ordem de execução descrita acima. Os secrets chegam por `secrets: inherit`. Os inputs são os mesmos do disparo manual:
-
-| Workflow | Inputs |
-| :--- | :--- |
-| `deploy-eks.yml`, `destroy-eks.yml` | `service` (padrão `all`) |
-| `deploy-auth-lambda.yml` | `image_tag` e `authorizer_image_tag` (obrigatórios) |
-| `deploy-api-gateway.yml`, `destroy-api-gateway.yml` | `auth_lambda_name` (padrão `ofisy-auth`) e `auth_authorizer_lambda_name` (padrão `ofisy-auth-authorizer`) |
-| Demais | Nenhum |
-
-Quando chamado de outro repositório, o checkout usa a branch padrão (`master`) deste repositório.
+Além do `workflow_dispatch`, os workflows de deploy e destroy aceitam `workflow_call`, e o repositório [ofisy-platform](https://github.com/15SOAT-FIAP/ofisy-platform) os chama em sequência pelo `up.yml` (sobe o ambiente) e pelo `down.yml` (destrói), seguindo a ordem de execução descrita acima. Os secrets chegam por `secrets: inherit`, e os inputs são os mesmos do disparo manual. Quando chamado de outro repositório, o checkout usa a branch padrão (`master`) deste repositório.
 
 ---
 
