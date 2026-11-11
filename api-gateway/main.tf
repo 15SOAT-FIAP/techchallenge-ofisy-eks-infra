@@ -204,10 +204,10 @@ locals {
     "GET /api/v1/service-orders/{id}/status"               = { service = "core", protected = true }
     "PATCH /api/v1/service-orders/quote/{id}/approve"      = { service = "core", protected = true }
     "PATCH /api/v1/service-orders/quote/{id}/reprove"      = { service = "core", protected = true }
-    "GET /api/v1/notifications/service-orders"             = { service = "core", protected = true }
-    "GET /api/v1/notifications/service-orders/unread"      = { service = "core", protected = true }
-    "GET /api/v1/notifications/service-orders/{id}"        = { service = "core", protected = true }
-    "PATCH /api/v1/notifications/service-orders/{id}/read" = { service = "core", protected = true }
+    "GET /api/v1/notifications/service-orders"             = { service = "notification", protected = true }
+    "GET /api/v1/notifications/service-orders/unread"      = { service = "notification", protected = true }
+    "GET /api/v1/notifications/service-orders/{id}"        = { service = "notification", protected = true }
+    "PATCH /api/v1/notifications/service-orders/{id}/read" = { service = "notification", protected = true }
   }
 }
 

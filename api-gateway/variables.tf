@@ -20,7 +20,8 @@ variable "nlb_service_names" {
   EOT
   type        = map(string)
   default = {
-    core = "default/ofisy-service"
+    core         = "default/ofisy-service"
+    notification = "default/ms-ofisy-notification-service"
   }
 }
 

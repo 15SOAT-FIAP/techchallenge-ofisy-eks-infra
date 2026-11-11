@@ -191,13 +191,13 @@ O `api-gateway/` expõe `POST /auth/customers` (repassando para a Lambda de emis
 
 Todas usam o **mesmo** `aws_apigatewayv2_authorizer` (`customers_token`) - um authorizer não é exclusivo de uma rota, então nenhuma Lambda ou permissão extra é criada por rota.
 
-As notificações de **estoque** (`/api/v1/notifications/stock/*`) ficam de fora de propósito: são operação interna de staff (papel `STOCKMAN`), resolvida dentro do app via JWT de staff - não fazem parte da jornada do cliente final. As demais rotas (login, admin, swagger etc.) também continuam sendo só repassadas pelo Gateway, sem essa camada extra.
+O Gateway encaminha as quatro rotas de notificação de ordem de serviço para o NLB de Notification. As rotas de notificação de estoque ficam fora desse roteamento de cliente. No microsserviço, elas exigem JWT de funcionário com perfil `ADMIN` ou `STOCKMAN`.
 
 ### Roteamento por microsserviço
 
 O Gateway tem uma integração por NLB de microsserviço (`var.nlb_service_names`), e as rotas ficam num único map, `local.service_routes` em `api-gateway/main.tf`, que liga cada rota ao serviço que a atende e diz se ela exige o token do cliente.
 
-Hoje só o **core** está no map: os microsserviços ainda não têm Service/NLB nem expõem todas as rotas que hoje vivem no core, e o `plan` do Gateway falha se um NLB listado não existir. Quando um serviço for extraído do core:
+O map inclui `core = "default/ofisy-service"` e `notification = "default/ms-ofisy-notification-service"`. O `plan` precisa encontrar os dois NLBs internos e seus listeners na porta 8080. Quando outro serviço for extraído do Core:
 
 1. adicione `<service> = "default/ms-ofisy-<service>-service"` em `nlb_service_names`;
 2. aponte as rotas dele para o serviço no `service_routes` (ex.: `"ANY /api/v1/stocks/{proxy+}" = { service = "stock", protected = false }`).
@@ -216,7 +216,7 @@ Os NLBs são criados pelo Kubernetes (não pelo Terraform), a partir do `Service
 
 ```hcl
 data "aws_lb" "service" {
-  for_each = var.nlb_service_names # hoje: core = "default/ofisy-service"
+  for_each = var.nlb_service_names
 
   tags = {
     "kubernetes.io/service-name" = each.value
@@ -235,11 +235,9 @@ O Service de cada microsserviço precisa expor a porta **8080**, mesmo que o con
 
 O trade-off é de ordenação: o `plan` do `api-gateway/` falha (em vez de só o `apply`) enquanto qualquer microsserviço listado em `nlb_service_names` ainda não tiver sido deployado, porque sem o `Service` não existe NLB a descobrir.
 
-**Pendência conhecida**: o header `X-Customer-Id` (usado para filtrar notificações de OS por cliente) não é mais injetado pela integração - decisão de escopo, não esquecimento. Enquanto isso não for retomado, as 4 rotas de `/api/v1/notifications/service-orders/*` respondem `400` (o controller do app exige esse header).
-
 ### Observação sobre a validação
 
-A validação do token acontece **só no Gateway** (Lambda Authorizer) - o app Spring Boot (`techchallenge-ofisy`) não valida esse token; todas as rotas acima continuam nos `public-paths` dele. Isso deixou de ser um problema de segurança a partir do momento em que o NLB ficou interno: não existe mais nenhum caminho de acesso à aplicação que não passe pelo Gateway.
+O Lambda Authorizer autentica o cliente no Gateway. Na revisão atual do Notification, as rotas de ordem de serviço aceitam a chamada sem `X-Customer-Id` e ainda não filtram consultas ou marcações de leitura por cliente. Antes de aplicar a troca, valide a autorização por cliente nas quatro rotas. O NLB interno limita o acesso direto à aplicação, enquanto a autorização por cliente limita quais notificações cada identidade pode acessar.
 
 ---
 
