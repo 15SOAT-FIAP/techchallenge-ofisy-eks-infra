@@ -148,6 +148,9 @@ resource "aws_apigatewayv2_integration" "nlb_proxy" {
   connection_id          = aws_apigatewayv2_vpc_link.ofisy.id
   integration_uri        = data.aws_lb_listener.service[each.key].arn
   payload_format_version = "1.0"
+  request_parameters = each.key == "notification" ? {
+    "overwrite:header.X-Customer-Id" = "$context.authorizer.customerId"
+  } : {}
 }
 
 ########################################

@@ -237,7 +237,11 @@ O trade-off é de ordenação: o `plan` do `api-gateway/` falha (em vez de só o
 
 ### Observação sobre a validação
 
-O Lambda Authorizer autentica o cliente no Gateway. Na revisão atual do Notification, as rotas de ordem de serviço aceitam a chamada sem `X-Customer-Id` e ainda não filtram consultas ou marcações de leitura por cliente. Antes de aplicar a troca, valide a autorização por cliente nas quatro rotas. O NLB interno limita o acesso direto à aplicação, enquanto a autorização por cliente limita quais notificações cada identidade pode acessar.
+O Lambda Authorizer autentica o cliente no Gateway. A integração de Notification
+sobrescreve `X-Customer-Id` com o `customerId` do contexto. O Notification confere
+esse valor com o subject do JWT e restringe cada operação ao dono da notificação.
+Antes de aplicar a troca, implante a versão compatível do Notification e valide as
+quatro rotas com dois clientes e um header enviado pelo cliente.
 
 ---
 
