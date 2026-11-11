@@ -47,7 +47,7 @@ locals {
     billing-notification = {
       topic  = "billing"
       queue  = "notification"
-      events = ["QuoteSentForApproval", "PaymentConfirmed"]
+      events = ["QuoteSentForApproval", "PaymentCheckoutCreated", "PaymentConfirmed", "PaymentFailed"]
     }
     billing-execution = {
       topic  = "billing"
