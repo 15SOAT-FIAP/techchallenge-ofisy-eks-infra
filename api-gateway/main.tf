@@ -148,9 +148,23 @@ resource "aws_apigatewayv2_integration" "nlb_proxy" {
   connection_id          = aws_apigatewayv2_vpc_link.ofisy.id
   integration_uri        = data.aws_lb_listener.service[each.key].arn
   payload_format_version = "1.0"
-  request_parameters = each.key == "notification" ? {
+}
+
+# Mesma integracao do nlb_proxy, mas sobrescrevendo X-Customer-Id com o
+# customerId do Lambda Authorizer. So para servicos com rota customer_header.
+resource "aws_apigatewayv2_integration" "nlb_proxy_customer" {
+  for_each = toset([for route in local.service_routes : route.service if try(route.customer_header, false)])
+
+  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
+  integration_type       = "HTTP_PROXY"
+  integration_method     = "ANY"
+  connection_type        = "VPC_LINK"
+  connection_id          = aws_apigatewayv2_vpc_link.ofisy.id
+  integration_uri        = data.aws_lb_listener.service[each.key].arn
+  payload_format_version = "1.0"
+  request_parameters = {
     "overwrite:header.X-Customer-Id" = "$context.authorizer.customerId"
-  } : {}
+  }
 }
 
 ########################################
@@ -201,16 +215,18 @@ resource "aws_apigatewayv2_route" "auth_customers" {
 # O que nao casar com nenhuma rota cai no ANY /{proxy+}, que vai pro core.
 # Enquanto um servico nao for extraido do core (com Service/NLB proprio e
 # entrada em var.nlb_service_names), as rotas dele continuam aqui no core.
+# customer_header (opcional, exige protected) repassa o customerId do
+# authorizer no header X-Customer-Id.
 locals {
   service_routes = {
     "ANY /{proxy+}"                                        = { service = "core", protected = false }
     "GET /api/v1/service-orders/{id}/status"               = { service = "core", protected = true }
     "PATCH /api/v1/service-orders/quote/{id}/approve"      = { service = "core", protected = true }
     "PATCH /api/v1/service-orders/quote/{id}/reprove"      = { service = "core", protected = true }
-    "GET /api/v1/notifications/service-orders"             = { service = "notification", protected = true }
-    "GET /api/v1/notifications/service-orders/unread"      = { service = "notification", protected = true }
-    "GET /api/v1/notifications/service-orders/{id}"        = { service = "notification", protected = true }
-    "PATCH /api/v1/notifications/service-orders/{id}/read" = { service = "notification", protected = true }
+    "GET /api/v1/notifications/service-orders"             = { service = "notification", protected = true, customer_header = true }
+    "GET /api/v1/notifications/service-orders/unread"      = { service = "notification", protected = true, customer_header = true }
+    "GET /api/v1/notifications/service-orders/{id}"        = { service = "notification", protected = true, customer_header = true }
+    "PATCH /api/v1/notifications/service-orders/{id}/read" = { service = "notification", protected = true, customer_header = true }
   }
 }
 
@@ -219,7 +235,7 @@ resource "aws_apigatewayv2_route" "service" {
 
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = each.key
-  target             = "integrations/${aws_apigatewayv2_integration.nlb_proxy[each.value.service].id}"
+  target             = "integrations/${try(each.value.customer_header, false) ? aws_apigatewayv2_integration.nlb_proxy_customer[each.value.service].id : aws_apigatewayv2_integration.nlb_proxy[each.value.service].id}"
   authorization_type = each.value.protected ? "CUSTOM" : "NONE"
   authorizer_id      = each.value.protected ? aws_apigatewayv2_authorizer.customers_token.id : null
 }
