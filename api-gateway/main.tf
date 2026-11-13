@@ -148,6 +148,9 @@ resource "aws_apigatewayv2_integration" "nlb_proxy" {
   connection_id          = aws_apigatewayv2_vpc_link.ofisy.id
   integration_uri        = data.aws_lb_listener.service[each.key].arn
   payload_format_version = "1.0"
+  request_parameters = each.key == "notification" ? {
+    "overwrite:header.X-Customer-Id" = "$context.authorizer.customerId"
+  } : {}
 }
 
 ########################################
@@ -204,10 +207,10 @@ locals {
     "GET /api/v1/service-orders/{id}/status"               = { service = "core", protected = true }
     "PATCH /api/v1/service-orders/quote/{id}/approve"      = { service = "core", protected = true }
     "PATCH /api/v1/service-orders/quote/{id}/reprove"      = { service = "core", protected = true }
-    "GET /api/v1/notifications/service-orders"             = { service = "core", protected = true }
-    "GET /api/v1/notifications/service-orders/unread"      = { service = "core", protected = true }
-    "GET /api/v1/notifications/service-orders/{id}"        = { service = "core", protected = true }
-    "PATCH /api/v1/notifications/service-orders/{id}/read" = { service = "core", protected = true }
+    "GET /api/v1/notifications/service-orders"             = { service = "notification", protected = true }
+    "GET /api/v1/notifications/service-orders/unread"      = { service = "notification", protected = true }
+    "GET /api/v1/notifications/service-orders/{id}"        = { service = "notification", protected = true }
+    "PATCH /api/v1/notifications/service-orders/{id}/read" = { service = "notification", protected = true }
   }
 }
 
