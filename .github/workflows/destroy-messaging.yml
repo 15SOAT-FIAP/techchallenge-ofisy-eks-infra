@@ -2,6 +2,7 @@ name: Destruir Mensageria SNS/SQS (Terraform)
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   destroy-messaging:
@@ -12,6 +13,8 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v7
+        with:
+          repository: 15SOAT-FIAP/techchallenge-ofisy-eks-infra
 
       - name: Configurar Credenciais AWS
         uses: aws-actions/configure-aws-credentials@v6
@@ -41,4 +44,8 @@ jobs:
       - name: Terraform Destroy
         run: |
           cd messaging
+          if [ -z "$(terraform state list)" ]; then
+            echo "State vazio, nada a destruir."
+            exit 0
+          fi
           terraform destroy -auto-approve

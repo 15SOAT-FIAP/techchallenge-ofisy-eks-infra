@@ -13,6 +13,14 @@ on:
         required: true
         type: string
         default: "ofisy-auth-authorizer"
+  workflow_call:
+    inputs:
+      auth_lambda_name:
+        type: string
+        default: "ofisy-auth"
+      auth_authorizer_lambda_name:
+        type: string
+        default: "ofisy-auth-authorizer"
 
 jobs:
   destroy-api-gateway:
@@ -23,6 +31,8 @@ jobs:
     steps:
       - name: Checkout do código
         uses: actions/checkout@v7
+        with:
+          repository: 15SOAT-FIAP/techchallenge-ofisy-eks-infra
 
       - name: Configurar Credenciais AWS
         uses: aws-actions/configure-aws-credentials@v6
@@ -58,4 +68,8 @@ jobs:
       - name: Terraform Destroy
         run: |
           cd api-gateway
+          if [ -z "$(terraform state list)" ]; then
+            echo "State vazio, nada a destruir."
+            exit 0
+          fi
           terraform destroy -auto-approve
