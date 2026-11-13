@@ -151,9 +151,9 @@ resource "aws_apigatewayv2_integration" "nlb_proxy" {
 }
 
 # Mesma integracao do nlb_proxy, mas sobrescrevendo X-Customer-Id com o
-# customerId do Lambda Authorizer. So para servicos com rota customer_header.
+# customerId do Lambda Authorizer. Usada pelas rotas protected.
 resource "aws_apigatewayv2_integration" "nlb_proxy_customer" {
-  for_each = toset([for route in local.service_routes : route.service if try(route.customer_header, false)])
+  for_each = toset([for route in local.service_routes : route.service if route.protected])
 
   api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
   integration_type       = "HTTP_PROXY"
@@ -213,20 +213,37 @@ resource "aws_apigatewayv2_route" "auth_customers" {
 
 # Rota -> microsservico que atende, e se exige o token do cliente.
 # O que nao casar com nenhuma rota cai no ANY /{proxy+}, que vai pro core.
-# Enquanto um servico nao for extraido do core (com Service/NLB proprio e
-# entrada em var.nlb_service_names), as rotas dele continuam aqui no core.
-# customer_header (opcional, exige protected) repassa o customerId do
-# authorizer no header X-Customer-Id.
+# O {proxy+} nao casa com o prefixo sozinho, por isso o par raiz + {proxy+}.
+# Rotas de funcionario ficam sem authorizer: cada servico valida o JWT de staff.
+# Rotas protected recebem o customerId do authorizer no header X-Customer-Id.
 locals {
   service_routes = {
-    "ANY /{proxy+}"                                        = { service = "core", protected = false }
-    "GET /api/v1/service-orders/{id}/status"               = { service = "core", protected = true }
-    "PATCH /api/v1/service-orders/quote/{id}/approve"      = { service = "core", protected = true }
-    "PATCH /api/v1/service-orders/quote/{id}/reprove"      = { service = "core", protected = true }
-    "GET /api/v1/notifications/service-orders"             = { service = "notification", protected = true, customer_header = true }
-    "GET /api/v1/notifications/service-orders/unread"      = { service = "notification", protected = true, customer_header = true }
-    "GET /api/v1/notifications/service-orders/{id}"        = { service = "notification", protected = true, customer_header = true }
-    "PATCH /api/v1/notifications/service-orders/{id}/read" = { service = "notification", protected = true, customer_header = true }
+    # core
+    "ANY /{proxy+}"                          = { service = "core", protected = false }
+    "GET /api/v1/service-orders/{id}/status" = { service = "core", protected = true }
+
+    # billing
+    "ANY /api/v1/quotes"                 = { service = "billing", protected = false }
+    "ANY /api/v1/quotes/{proxy+}"        = { service = "billing", protected = false }
+    "PATCH /api/v1/quotes/{id}/approve"  = { service = "billing", protected = true }
+    "PATCH /api/v1/quotes/{id}/reprove"  = { service = "billing", protected = true }
+    "ANY /api/v1/payments"               = { service = "billing", protected = false }
+    "POST /api/v1/webhooks/mercado-pago" = { service = "billing", protected = false }
+
+    # stock
+    "ANY /api/v1/stocks"          = { service = "stock", protected = false }
+    "ANY /api/v1/stocks/{proxy+}" = { service = "stock", protected = false }
+    "ANY /api/v1/stock-movements" = { service = "stock", protected = false }
+
+    # execution
+    "ANY /api/v1/service_order_executions"          = { service = "execution", protected = false }
+    "ANY /api/v1/service_order_executions/{proxy+}" = { service = "execution", protected = false }
+
+    # notification
+    "ANY /api/v1/notifications/service-orders"          = { service = "notification", protected = true }
+    "ANY /api/v1/notifications/service-orders/{proxy+}" = { service = "notification", protected = true }
+    "ANY /api/v1/notifications/stock"                   = { service = "notification", protected = false }
+    "ANY /api/v1/notifications/stock/{proxy+}"          = { service = "notification", protected = false }
   }
 }
 
@@ -235,7 +252,7 @@ resource "aws_apigatewayv2_route" "service" {
 
   api_id             = aws_apigatewayv2_api.ofisy_gateway.id
   route_key          = each.key
-  target             = "integrations/${try(each.value.customer_header, false) ? aws_apigatewayv2_integration.nlb_proxy_customer[each.value.service].id : aws_apigatewayv2_integration.nlb_proxy[each.value.service].id}"
+  target             = "integrations/${each.value.protected ? aws_apigatewayv2_integration.nlb_proxy_customer[each.value.service].id : aws_apigatewayv2_integration.nlb_proxy[each.value.service].id}"
   authorization_type = each.value.protected ? "CUSTOM" : "NONE"
   authorizer_id      = each.value.protected ? aws_apigatewayv2_authorizer.customers_token.id : null
 }

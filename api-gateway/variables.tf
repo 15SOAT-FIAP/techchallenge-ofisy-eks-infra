@@ -14,13 +14,14 @@ variable "nlb_service_names" {
     Listener usado pelo VPC Link e descoberto via data source pela tag
     "kubernetes.io/service-name" que o cloud provider grava no Load Balancer.
     Por isso o deploy de cada microsservico listado aqui precisa acontecer
-    antes do apply deste module. So entram no map os servicos que ja tem
-    Service deployado: os demais (ex.: "default/ms-ofisy-stock-service")
-    sao adicionados quando forem extraidos do core.
+    antes do apply deste module.
   EOT
   type        = map(string)
   default = {
     core         = "default/ofisy-service"
+    billing      = "default/ms-ofisy-billing-service"
+    stock        = "default/ms-ofisy-stock-service"
+    execution    = "default/ms-ofisy-execution-service"
     notification = "default/ms-ofisy-notification-service"
   }
 }
