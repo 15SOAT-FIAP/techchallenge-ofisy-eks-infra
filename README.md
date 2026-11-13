@@ -117,7 +117,7 @@ Como não há referência direta entre states, o que liga as camadas são **nome
 | Função Lambda (emissão de token) | `ofisy-auth` | `infra-auth/` | `api-gateway/` |
 | Função Lambda (authorizer) | `ofisy-auth-authorizer` | `infra-auth/` | `api-gateway/` |
 | NLB do core (interno) | tag `kubernetes.io/service-name` = `default/ofisy-service` | `techchallenge-ofisy` (Service do k8s) | `api-gateway/` |
-| NLB dos demais serviços (interno, quando forem extraídos do core) | tag `kubernetes.io/service-name` = `default/ms-ofisy-<service>-service` | `ms-ofisy-<service>` (Service do k8s) | `api-gateway/` |
+| NLB dos demais serviços (interno) | tag `kubernetes.io/service-name` = `default/ms-ofisy-<service>-service` | `ms-ofisy-<service>` (Service do k8s) | `api-gateway/` |
 | Tópico SNS de cada serviço publicador | `ofisy-<service>-events.fifo` | `messaging/` | Cada microsserviço (publica pelo nome) |
 | Fila SQS de cada serviço consumidor | `ofisy-<service>.fifo` | `messaging/` | Cada microsserviço (consome pelo nome) |
 
@@ -184,23 +184,36 @@ Variáveis relevantes (`api-gateway/variables.tf`): `datadog_api_key`, `datadog_
 
 O `api-gateway/` expõe `POST /auth/customers` (repassando para a Lambda de emissão de token) e valida, através de um **Lambda Authorizer**, todas as rotas pensadas para o cliente final:
 
-- `GET /api/v1/service-orders/{id}/status`
-- `PATCH /api/v1/service-orders/quote/{id}/approve`
-- `PATCH /api/v1/service-orders/quote/{id}/reprove`
-- `GET /api/v1/notifications/service-orders` (+ `/unread`, `/{id}`, `PATCH /{id}/read`)
+- `GET /api/v1/service-orders/{id}/status` (Core)
+- `PATCH /api/v1/quotes/{id}/approve` e `PATCH /api/v1/quotes/{id}/reprove` (Billing)
+- `GET /api/v1/notifications/service-orders` (+ `/unread`, `/{id}`, `PATCH /{id}/read`) (Notification)
 
 Todas usam o **mesmo** `aws_apigatewayv2_authorizer` (`customers_token`) - um authorizer não é exclusivo de uma rota, então nenhuma Lambda ou permissão extra é criada por rota.
 
-O Gateway encaminha as quatro rotas de notificação de ordem de serviço para o NLB de Notification. As rotas de notificação de estoque ficam fora desse roteamento de cliente. No microsserviço, elas exigem JWT de funcionário com perfil `ADMIN` ou `STOCKMAN`.
+As rotas de funcionário (inclusive as notificações de estoque) passam pelo Gateway sem authorizer: cada microsserviço valida o JWT de funcionário e o perfil com `@PreAuthorize`.
 
 ### Roteamento por microsserviço
 
 O Gateway tem uma integração por NLB de microsserviço (`var.nlb_service_names`), e as rotas ficam num único map, `local.service_routes` em `api-gateway/main.tf`, que liga cada rota ao serviço que a atende e diz se ela exige o token do cliente.
 
-O map inclui `core = "default/ofisy-service"` e `notification = "default/ms-ofisy-notification-service"`. O `plan` precisa encontrar os dois NLBs internos e seus listeners na porta 8080. Quando outro serviço for extraído do Core:
+| Serviço | Service (`nlb_service_names`) | Rotas |
+|---|---|---|
+| `core` | `default/ofisy-service` | `ANY /{proxy+}` (login, usuários, clientes, veículos, catálogo, ordens de serviço) |
+| `billing` | `default/ms-ofisy-billing-service` | `/api/v1/quotes/**`, `/api/v1/payments`, `POST /api/v1/webhooks/mercado-pago` |
+| `stock` | `default/ms-ofisy-stock-service` | `/api/v1/stocks/**`, `/api/v1/stock-movements` |
+| `execution` | `default/ms-ofisy-execution-service` | `/api/v1/service_order_executions/**` |
+| `notification` | `default/ms-ofisy-notification-service` | `/api/v1/notifications/service-orders/**`, `/api/v1/notifications/stock/**` |
+
+O que não casar com nenhuma rota cai no `ANY /{proxy+}`, que vai para o Core. Como o `{proxy+}` não casa com o prefixo sozinho, cada prefixo tem a raiz e a raiz com `/{proxy+}` (ex.: `ANY /api/v1/stocks` e `ANY /api/v1/stocks/{proxy+}`). Uma rota mais específica, como `PATCH /api/v1/quotes/{id}/approve`, vence a greedy e pode ter authorizer próprio.
+
+Para adicionar um serviço:
 
 1. adicione `<service> = "default/ms-ofisy-<service>-service"` em `nlb_service_names`;
-2. aponte as rotas dele para o serviço no `service_routes` (ex.: `"ANY /api/v1/stocks/{proxy+}" = { service = "stock", protected = false }`).
+2. aponte as rotas dele para o serviço no `service_routes` (ex.: `"ANY /api/v1/<prefixo>/{proxy+}" = { service = "<service>", protected = false }`).
+
+Toda rota com `protected = true` usa a integração `nlb_proxy_customer`, que sobrescreve o header `X-Customer-Id` com o `customerId` devolvido pelo Lambda Authorizer. Um header forjado pelo cliente é descartado, e o serviço que precisar do cliente autenticado só lê o header.
+
+Num prefixo `{proxy+}` com authorizer, todo endpoint novo sob ele também exige o token do cliente.
 
 ### Por que um Lambda Authorizer
 
@@ -210,7 +223,7 @@ O HTTP API do lab não valida JWT nativamente quando a assinatura é simétrica 
 
 Os NLBs dos microsserviços são **internos** (sem IP público), e o único ponto de entrada público de toda a aplicação passa a ser o próprio API Gateway. Como o Gateway roda fora da VPC, ele alcança os NLBs através de um único `aws_apigatewayv2_vpc_link`, com ENIs provisionadas nas subnets privadas.
 
-Uma NLB opera na camada 4 (TCP puro) e não entende path de URL. Por isso a integração via VPC Link (`connection_type = "VPC_LINK"`) aponta pro **ARN do Listener** da NLB, não pra uma URL com path embutido. Consequência direta: existe **uma integração por microsserviço** (`nlb_proxy["<service>"]`), compartilhada por todas as rotas daquele serviço. O path original da requisição passa direto, e quem diferencia cada rota é só o serviço de destino e a presença (ou não) de `authorization_type`/`authorizer_id`.
+Uma NLB opera na camada 4 (TCP puro) e não entende path de URL. Por isso a integração via VPC Link (`connection_type = "VPC_LINK"`) aponta pro **ARN do Listener** da NLB, não pra uma URL com path embutido. Consequência direta: existe **uma integração por microsserviço** (`nlb_proxy["<service>"]`), compartilhada por todas as rotas daquele serviço, mais uma `nlb_proxy_customer["<service>"]` para os serviços com rotas `protected`. O path original da requisição passa direto, e quem diferencia cada rota é só o serviço de destino e a presença (ou não) de `authorization_type`/`authorizer_id`.
 
 Os NLBs são criados pelo Kubernetes (não pelo Terraform), a partir do `Service` `type: LoadBalancer` definido no `k8s/service.yml` de cada microsserviço. Mesmo assim o ARN do Listener **não precisa ser informado manualmente**: o cloud provider grava no Load Balancer a tag `kubernetes.io/service-name` com o valor `namespace/nome` do Service, e o module descobre cada Listener a partir dela:
 
@@ -231,17 +244,13 @@ data "aws_lb_listener" "service" {
 }
 ```
 
-O Service de cada microsserviço precisa expor a porta **8080**, mesmo que o container escute em outra (o notification usa `targetPort: 8081`).
+O Service de cada microsserviço precisa expor a porta **8080**.
 
 O trade-off é de ordenação: o `plan` do `api-gateway/` falha (em vez de só o `apply`) enquanto qualquer microsserviço listado em `nlb_service_names` ainda não tiver sido deployado, porque sem o `Service` não existe NLB a descobrir.
 
 ### Observação sobre a validação
 
-O Lambda Authorizer autentica o cliente no Gateway. A integração de Notification
-sobrescreve `X-Customer-Id` com o `customerId` do contexto. O Notification confere
-esse valor com o subject do JWT e restringe cada operação ao dono da notificação.
-Antes de aplicar a troca, implante a versão compatível do Notification e valide as
-quatro rotas com dois clientes e um header enviado pelo cliente.
+O Lambda Authorizer autentica o cliente no Gateway, e as rotas protegidas recebem o `X-Customer-Id` sobrescrito com o `customerId` do contexto. Os microsserviços não validam o token do cliente: confiam nesse header, o que é seguro porque os NLBs são internos e o Gateway é o único caminho até eles. O Notification usa o header para restringir as notificações de ordem de serviço ao cliente dono.
 
 ---
 
