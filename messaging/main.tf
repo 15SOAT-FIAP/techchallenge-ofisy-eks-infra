@@ -29,9 +29,9 @@ locals {
       queue  = "execution"
       events = ["ServiceOrderCancelled"]
     }
-    service-order-notification = {
+    service-order-billing = {
       topic  = "service-order"
-      queue  = "notification"
+      queue  = "billing"
       events = ["ServiceOrderFinished"]
     }
     billing-stock = {
@@ -57,7 +57,7 @@ locals {
     stock-billing = {
       topic  = "stock"
       queue  = "billing"
-      events = ["StockConsumed", "StockConsumptionFailed"]
+      events = ["StockConsumed", "StockConsumptionFailed", "StockRefunded"]
     }
     stock-notification = {
       topic  = "stock"
