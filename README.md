@@ -132,12 +132,12 @@ Os microsserviços conversam por eventos. Os serviços publicadores têm um tóp
 | Tópico | Fila | Eventos |
 | :--- | :--- | :--- |
 | `ofisy-service-order-events.fifo` | `ofisy-execution.fifo` | `ServiceOrderCancelled` |
-| `ofisy-service-order-events.fifo` | `ofisy-notification.fifo` | `ServiceOrderFinished` |
+| `ofisy-service-order-events.fifo` | `ofisy-billing.fifo` | `ServiceOrderFinished` |
 | `ofisy-billing-events.fifo` | `ofisy-stock.fifo` | `QuoteCreated`, `QuoteUpdated`, `QuoteReproved` |
 | `ofisy-billing-events.fifo` | `ofisy-service-order.fifo` | `QuoteSentForApproval`, `QuoteApproved`, `PaymentConfirmed`, `QuoteCancelled` |
 | `ofisy-billing-events.fifo` | `ofisy-notification.fifo` | `QuoteSentForApproval`, `PaymentCheckoutCreated`, `PaymentConfirmed`, `PaymentFailed` |
 | `ofisy-billing-events.fifo` | `ofisy-execution.fifo` | `QuoteApproved` |
-| `ofisy-stock-events.fifo` | `ofisy-billing.fifo` | `StockConsumed`, `StockConsumptionFailed` |
+| `ofisy-stock-events.fifo` | `ofisy-billing.fifo` | `StockConsumed`, `StockConsumptionFailed`, `StockRefunded` |
 | `ofisy-stock-events.fifo` | `ofisy-notification.fifo` | `StockLow` |
 | `ofisy-stock-events.fifo` | `ofisy-service-order.fifo` | `StockRefunded` |
 | `ofisy-execution-events.fifo` | `ofisy-service-order.fifo` | `ExecutionStarted`, `AllExecutionsCompleted` |
