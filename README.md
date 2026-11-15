@@ -215,6 +215,12 @@ Toda rota com `protected = true` usa a integração `nlb_proxy_customer`, que so
 
 Num prefixo `{proxy+}` com authorizer, todo endpoint novo sob ele também exige o token do cliente.
 
+### Swagger agregado
+
+O Swagger UI do Core (`/swagger-ui/index.html`) lista a spec de todos os microsserviços. A do Core vem do próprio `/v3/api-docs`, que cai no `ANY /{proxy+}`. A dos demais vem de `GET /docs/<service>` (ex.: `/docs/stock`), que a integração `nlb_api_docs` repassa para o `/v3/api-docs` do serviço. O "Try it out" chama as rotas de negócio na raiz do Gateway, então segue o mesmo roteamento e o mesmo authorizer das chamadas normais.
+
+Todo serviço em `nlb_service_names`, menos o Core, ganha a rota `/docs/<service>` automaticamente.
+
 ### Por que um Lambda Authorizer
 
 O HTTP API do lab não valida JWT nativamente quando a assinatura é simétrica (HS256) - o "JWT Authorizer" nativo da AWS só verifica assinatura assimétrica, via um endpoint JWKS. Como a Lambda de auth assina o token com HS256, a validação precisa passar por uma Lambda Authorizer própria.
