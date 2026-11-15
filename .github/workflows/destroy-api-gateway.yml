@@ -24,7 +24,7 @@ on:
 
 jobs:
   destroy-api-gateway:
-    name: Destruir API Gateway
+    name: API Gateway
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 

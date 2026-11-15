@@ -6,7 +6,7 @@ on:
 
 jobs:
   destroy-network:
-    name: Destruir Rede
+    name: Rede, SGs e ECRs
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 

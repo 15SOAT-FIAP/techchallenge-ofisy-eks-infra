@@ -6,7 +6,7 @@ on:
 
 jobs:
   destroy-auth-lambda:
-    name: Destruir Lambda de Autenticação
+    name: Lambda de Auth
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 

@@ -6,7 +6,7 @@ on:
 
 jobs:
   destroy-messaging:
-    name: Destruir Mensageria SNS/SQS
+    name: Mensageria SNS/SQS
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 
