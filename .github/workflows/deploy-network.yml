@@ -6,7 +6,7 @@ on:
 
 jobs:
   terraform-network:
-    name: Provisionar Rede, Security Groups e ECRs das Lambdas (Terraform)
+    name: Rede, SGs e ECRs
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 

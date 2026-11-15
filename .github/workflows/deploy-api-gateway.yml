@@ -24,7 +24,7 @@ on:
 
 jobs:
   terraform-api-gateway:
-    name: Provisionar API Gateway (Terraform)
+    name: API Gateway
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 

@@ -17,7 +17,7 @@ on:
 
 jobs:
   destroy-eks:
-    name: Destruir cluster ${{ matrix.service }}
+    name: Cluster ${{ matrix.service }}
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 
