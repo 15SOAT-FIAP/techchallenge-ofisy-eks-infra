@@ -6,7 +6,7 @@ on:
 
 jobs:
   terraform-messaging:
-    name: Provisionar Mensageria SNS/SQS (Terraform)
+    name: Mensageria SNS/SQS
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
 

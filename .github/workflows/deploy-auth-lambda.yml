@@ -22,7 +22,7 @@ on:
 
 jobs:
   terraform-auth-lambda:
-    name: Provisionar Lambda de Autenticação (Terraform)
+    name: Lambda de Auth
     runs-on: ubuntu-latest
     environment: AWS_ACADEMY
     
