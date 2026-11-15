@@ -20,6 +20,25 @@ resource "aws_eks_cluster" "main" {
 }
 
 ########################################
+# EKS NODE LAUNCH TEMPLATE
+########################################
+
+# Hop limit 2 para os pods conseguirem buscar as credenciais da role do nó no IMDS
+resource "aws_launch_template" "node" {
+  name_prefix = "${local.name_prefix}-node-"
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
+  tags = {
+    Name = "${local.name_prefix}-node-lt"
+  }
+}
+
+########################################
 # EKS NODE GROUP
 ########################################
 
@@ -30,6 +49,11 @@ resource "aws_eks_node_group" "main" {
   subnet_ids      = data.aws_subnets.private.ids
 
   instance_types = ["t3.medium"]
+
+  launch_template {
+    id      = aws_launch_template.node.id
+    version = aws_launch_template.node.latest_version
+  }
 
   scaling_config {
     desired_size = 1
