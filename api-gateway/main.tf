@@ -167,6 +167,22 @@ resource "aws_apigatewayv2_integration" "nlb_proxy_customer" {
   }
 }
 
+# Spec de cada servico para o Swagger agregado do core
+resource "aws_apigatewayv2_integration" "nlb_api_docs" {
+  for_each = { for service, name in var.nlb_service_names : service => name if service != "core" }
+
+  api_id                 = aws_apigatewayv2_api.ofisy_gateway.id
+  integration_type       = "HTTP_PROXY"
+  integration_method     = "GET"
+  connection_type        = "VPC_LINK"
+  connection_id          = aws_apigatewayv2_vpc_link.ofisy.id
+  integration_uri        = data.aws_lb_listener.service[each.key].arn
+  payload_format_version = "1.0"
+  request_parameters = {
+    "overwrite:path" = "/v3/api-docs"
+  }
+}
+
 ########################################
 # LAMBDA AUTHORIZER
 ########################################
@@ -255,6 +271,14 @@ resource "aws_apigatewayv2_route" "service" {
   target             = "integrations/${each.value.protected ? aws_apigatewayv2_integration.nlb_proxy_customer[each.value.service].id : aws_apigatewayv2_integration.nlb_proxy[each.value.service].id}"
   authorization_type = each.value.protected ? "CUSTOM" : "NONE"
   authorizer_id      = each.value.protected ? aws_apigatewayv2_authorizer.customers_token.id : null
+}
+
+resource "aws_apigatewayv2_route" "api_docs" {
+  for_each = aws_apigatewayv2_integration.nlb_api_docs
+
+  api_id    = aws_apigatewayv2_api.ofisy_gateway.id
+  route_key = "GET /docs/${each.key}"
+  target    = "integrations/${each.value.id}"
 }
 
 resource "aws_apigatewayv2_stage" "default" {
