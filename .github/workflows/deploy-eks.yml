@@ -60,9 +60,9 @@ jobs:
       - name: Descobrir Roles do EKS
         run: |
           EKS_CLUSTER_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksClusterRole')].RoleName" --output text)
-          EKS_NODE_ROLE=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksNodeRole')].RoleName" --output text)
           echo "TF_VAR_eks_cluster_role=${EKS_CLUSTER_ROLE:-LabRole}" >> $GITHUB_ENV
-          echo "TF_VAR_eks_node_role=${EKS_NODE_ROLE:-LabRole}" >> $GITHUB_ENV
+          # LabRole nos nós porque a LabEksNodeRole não tem acesso a SQS/SNS
+          echo "TF_VAR_eks_node_role=LabRole" >> $GITHUB_ENV
 
       - name: Terraform Init
         run: |

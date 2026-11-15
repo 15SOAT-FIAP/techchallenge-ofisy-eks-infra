@@ -330,9 +330,9 @@ cd eks/core
 
 export TF_VAR_account_id=<account_id>
 export TF_VAR_datadog_api_key=<datadog_api_key>
-# No AWS Academy, se existirem, informe também as roles do EKS:
+# No AWS Academy, se existir, informe também a role do control plane.
+# Os nós ficam na LabRole (default), porque a LabEksNodeRole não tem acesso a SQS/SNS:
 # export TF_VAR_eks_cluster_role=<LabEksClusterRole...>
-# export TF_VAR_eks_node_role=<LabEksNodeRole...>
 
 terraform init \
   -backend-config="bucket=ofisy-tfstate-<account_id>" \
