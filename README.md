@@ -73,8 +73,8 @@ flowchart TD
     P7["7. eks-infra - api-gateway/<br/>API Gateway publico"]
     PM["eks-infra - messaging/<br/>Topicos SNS e filas SQS"]
 
-    P1 --> P2 --> P6
-    P1 --> P4 --> P5 --> P6 --> P7
+    P1 --> P2 --> P6 --> P7
+    P1 --> P4 --> P5 --> P7
     P1 --> P3 --> P5
     P4 --> P6
     PM --> P6
@@ -89,10 +89,10 @@ Cada etapa só pode rodar depois que as anteriores terminaram. A tabela abaixo d
 | **3** | Os repositórios ECR `ofisy-auth` e `ofisy-auth-authorizer`, vazios, criados na etapa 1 |
 | **4** | VPC, subnets privadas e o SG da Lambda, da etapa 1. O RDS libera a porta 5432 para o CIDR da VPC, então não depende dos clusters |
 | **5** | O banco do core (etapa 4), as imagens da etapa 3 e os Security Groups da etapa 1 |
-| **6** | O cluster e o ECR do serviço (etapa 2) e o banco dele (etapa 4) |
+| **6** | O cluster e o ECR do serviço (etapa 2), o banco dele (etapa 4) e a mensageria. O billing também espera o core e o stock, e o notification espera o core, porque o CD de cada um descobre o NLB interno dessas dependências para as chamadas síncronas |
 | **7** | As duas funções Lambda da etapa 5 e os NLBs (internos) dos microsserviços listados em `nlb_service_names`, criados na etapa 6 |
 
-As etapas **2, 3 e 4 não dependem umas das outras** e podem rodar em paralelo depois da etapa 1. Dentro das etapas 2, 4 e 6, cada microsserviço é independente dos outros.
+As etapas **2, 3 e 4 não dependem umas das outras** e podem rodar em paralelo depois da etapa 1. Dentro das etapas 2 e 4, cada microsserviço é independente dos outros. As Lambdas da etapa 5 só são pré-requisito do API Gateway: os microsserviços da etapa 6 podem subir em paralelo com elas.
 
 A **mensageria** (`messaging/`) não depende de nenhuma outra camada, nem da rede, e pode rodar a qualquer momento. Ela só precisa existir antes da etapa 6, porque os microsserviços não sobem sem a fila que consomem.
 
@@ -148,7 +148,7 @@ O roteamento fica no mapa `subscriptions` de `messaging/main.tf`.
 Para a entrega funcionar, todo publicador precisa seguir o mesmo contrato:
 
 - O corpo da mensagem é o envelope `{ eventId, type, serviceOrderId, occurredAt, payload }`, e o filtro das assinaturas lê o `type` dele.
-- Todo publish informa um `MessageGroupId` (o `serviceOrderId`), que garante a ordem dos eventos de uma mesma OS.
+- Todo publish informa um `MessageGroupId` (o `serviceOrderId`), que garante a ordem dos eventos de uma mesma OS. A exceção é o `StockLow`, que não pertence a uma OS e é agrupado pelo id do item de estoque.
 - As assinaturas usam *raw delivery*, então o consumidor recebe o envelope como foi publicado, sem o invólucro do SNS.
 
 ---
@@ -157,7 +157,7 @@ Para a entrega funcionar, todo publicador precisa seguir o mesmo contrato:
 
 Cada `eks/<service>/` também provisiona o **Datadog Agent** no seu cluster via Helm (`helm_release.datadog`, chart `datadog/datadog`, em `modules/eks/datadog.tf`), usando o provider `helm` do Terraform autenticado contra o próprio cluster criado na mesma execução (`aws_eks_cluster_auth`). No Datadog, cada cluster aparece com o próprio nome (`ms-ofisy-<service>-cluster`).
 
-O Agent roda como DaemonSet (um pod por node) mais o Cluster Agent, coletando métricas de CPU e memória de nodes e pods via kubelet/kube-state-metrics. Logs (JSON estruturado, com correlação de requisições) e APM (via hostPort TCP 8126) ficam habilitados; o Process Agent continua desativado para manter o footprint baixo nos nodes `t3.medium`. A correlação entre logs e traces e o envio de spans de latência das APIs dependem da instrumentação da aplicação (`dd-trace-java`) no repositório `techchallenge-ofisy`.
+O Agent roda como DaemonSet (um pod por node) mais o Cluster Agent, coletando métricas de CPU e memória de nodes e pods via kubelet/kube-state-metrics. Logs (JSON estruturado, com correlação de requisições) e APM (via hostPort TCP 8126) ficam habilitados; o Process Agent continua desativado para manter o footprint baixo nos nodes `t3.medium`. A correlação entre logs e traces e o envio de spans de latência das APIs dependem da instrumentação de cada aplicação (`dd-java-agent` na imagem do core e de cada microsserviço).
 
 Alertas (`datadog_monitor`) não são gerenciados por Terraform neste repositório, são criados manualmente na UI do Datadog. Healthcheck/uptime é a única exceção - ver seção abaixo.
 
